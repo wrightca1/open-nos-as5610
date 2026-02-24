@@ -170,13 +170,14 @@ This is the heart of the project. It is a C library that provides the control-pl
 | **l2** | `bcm56846_l2_addr_add()`, `bcm56846_l2_addr_delete()`, `bcm56846_l2_addr_get()` | ✅ L2_ENTRY + L2_USER_ENTRY bit layouts verified on live switch |
 | **l3** | `bcm56846_l3_egress_create()`, `bcm56846_l3_route_add()`, `bcm56846_l3_route_delete()`, `bcm56846_l3_host_add()` | ✅ Full L3/ECMP/nexthop chain verified on live switch |
 | **ecmp** | `bcm56846_l3_ecmp_create()`, `bcm56846_l3_ecmp_destroy()` | ✅ L3_ECMP + L3_ECMP_GROUP format verified |
-| **vlan** | `bcm56846_vlan_create()`, `bcm56846_vlan_port_add()`, `bcm56846_vlan_destroy()` | ⚠️ VLAN_XLATE not used in pure L3 mode; basic VLAN table needed |
-| **pktio** | `bcm56846_tx()`, `bcm56846_rx_register()`, `bcm56846_rx_start()` | ⚠️ TX/RX path architecture known; exact BDE DMA packet interface needs work |
+| **vlan** | `bcm56846_vlan_create()`, `bcm56846_vlan_port_add()`, `bcm56846_vlan_destroy()` | ✅ VLAN (ingress 0x12168000, 4096×40B) + EGR_VLAN (egress 0x0d260000, 4096×29B) fully verified. PORT_BITMAP + ING_PORT_BITMAP + UT_PORT_BITMAP bit positions confirmed. [VLAN_TABLE_FORMAT.md](../docs/reverse-engineering/VLAN_TABLE_FORMAT.md) |
+| **pktio** | `bcm56846_tx()`, `bcm56846_rx_register()`, `bcm56846_rx_start()` | ✅ DCB type 21 (16 words, 64 bytes), TX LOCAL_DEST_PORT encoding, RX metadata layout, BDE ioctls (WAIT_FOR_INTERRUPT/SEM_OP), thread model all verified. [PKTIO_BDE_DMA_INTERFACE.md](../docs/reverse-engineering/PKTIO_BDE_DMA_INTERFACE.md) |
 | **schan** | Internal: `schan_write()`, `schan_read()` | ✅ S-Channel DMA path + command word format documented |
 | **serdes** | Internal: `wc_b0_init_10g()`, `wc_b0_mdio_write()` | ✅ Full Warpcore WC-B0 MDIO init sequence captured via GDB |
-| **stats** | `bcm56846_stat_get()` | ⚠️ Counter registers partially known |
+| **stats** | `bcm56846_stat_get()` | ✅ XLMAC counter register offsets (RPKT/RBYT/TPKT/TBYT/R64/T64 etc), S-Channel address formula, port→block/lane mapping all verified. [STATS_COUNTER_FORMAT.md](../docs/reverse-engineering/STATS_COUNTER_FORMAT.md) |
+| **ipv6** | `bcm56846_l3_route_add()` IPv6, `bcm56846_l3_host_add()` IPv6 | ✅ L3_DEFIP_128 (/128 TCAM, 0x0a176000, 256×39B), L3_DEFIP double-wide (LPM ≤/64), L3_ENTRY_IPV6_UNICAST (unused) — all verified. [L3_IPV6_FORMAT.md](../docs/reverse-engineering/L3_IPV6_FORMAT.md) |
 
-**Key design decision**: Our SDK calls into the BDE via the same ioctl interface that the Broadcom SDK uses. We do NOT implement our own PCI/DMA layer. We open `/dev/linux-user-bde`, use `LUBDE_*` ioctls, and the `mmap`-based DMA pool.
+**Key design decision**: Our SDK calls into our own BDE via the `NOS_BDE_*` ioctl interface. We open `/dev/nos-bde`, use `NOS_BDE_READ_REG`, `NOS_BDE_WRITE_REG`, `NOS_BDE_GET_DMA_INFO`, and `NOS_BDE_SCHAN_OP` ioctls, and access the DMA pool via `mmap`. See `bde/README.md` for the full ioctl spec.
 
 ### 3.3 nos-switchd — Control Plane Daemon
 
@@ -1004,9 +1005,6 @@ In order of increasing complexity:
 | Gap | Risk | Status | Mitigation |
 |-----|------|--------|-----------|
 | **LED programs (led0.hex, led1.hex)** | Medium — port LEDs dark without them; switch still forwards | **Added to Phase 2b** | LED microcode captured from live switch (led0.asm=5104B, led1.asm=5223B); ship in `/etc/nos/` |
-| **IPv6 L3_DEFIP format** | Medium — IPv6 routes fail silently if MODE bit wrong | ⚠️ Needs verification | `L3_DEFIP` MODE bit=1 for IPv6; key is `(VRF<<33)|(IPv6_addr_128b)|MODE=1`; verify against live switch |
-| **Hardware stats → interface counters** | Medium — `ip -s link` shows zero counters; no rate monitoring | ⚠️ Deferred | Counter registers partially known; `bcm_stat_flags=0x1` in config.bcm enables collection; add after forwarding works |
-| **A/B slot upgrade procedure** | Medium — without upgrade path the switch is stuck on initial version | **Added to §10.4** | `fw_setenv cl.active 2` + write to inactive sda7/sda8; rollback by reverting `cl.active` |
 | **Serial console / UART** | Low — no console access during boot failures | ⚠️ DTB dependency | P2020 has DUART at 0xffe04500; DTB must define `serial0`; `CONFIG_SERIAL_8250=y`; baud 115200 |
 
 ### 13.3 Deferred / Nice-to-Have
@@ -1020,16 +1018,20 @@ In order of increasing complexity:
 | **SNMP** | snmpd from Debian; MIBs need nos-switchd counter data |
 | **Zero Touch Provisioning (ZTP)** | DHCP option 239; useful for production deployments |
 | **Port watchdog** | CPLD watchdog: `watch_dog_enable` sysfs; reset if nos-switchd hangs |
-| **VLAN table format** | VLAN_XLATE not used in pure L3 mode; add when L2 switching needed |
+| **VLAN table format (implementation)** | RE data complete: ingress VLAN 0x12168000 (4096×40B), EGR_VLAN 0x0d260000 (4096×29B), PORT_BITMAP bit positions all verified. Implementation deferred until L2 switching is needed. |
 
 ### 13.4 Low Risk / Resolved
 
 | Gap | Resolution |
 |-----|-----------|
-| **Packet I/O DCB exact format** | DCB layout from KNET source + strace on Cumulus packet I/O; format captured in `DMA_DCB_LAYOUT_FROM_KNET.md` |
-| **S-Channel DMA completion** | Protocol documented in `WRITE_MECHANISM_ANALYSIS.md`; GDB trace confirmed flow |
-| **PPC32 kernel version** | We write our own BDE; no external BDE version dependency |
-| **mb_led_rst GPIO** | Not found under sysfs on live switch; skip LED reset if GPIO absent; non-fatal |
+| **Packet I/O DCB exact format** | ✅ DCB type 21 confirmed: 16 words (64 bytes). TX LOCAL_DEST_PORT encoding, RX ingress port metadata layout, BDE `WAIT_FOR_INTERRUPT`/`SEM_OP` ioctl sequence all verified. See `PKTIO_BDE_DMA_INTERFACE.md` |
+| **S-Channel DMA completion** | ✅ Protocol documented in `WRITE_MECHANISM_ANALYSIS.md`; GDB trace confirmed command word format `0x2800XXXX` and DMA path |
+| **IPv6 L3_DEFIP format** | ✅ L3_DEFIP_128 table (0x0a176000, 256×39B) for /128; L3_DEFIP double-wide (MODE0=MODE1=1) for prefixes ≤/64; L3_ENTRY_IPV6_UNICAST unused. See `L3_IPV6_FORMAT.md` |
+| **Hardware stats / counters** | ✅ XLMAC counter register offsets verified: RPKT=0x0b, RBYT=0x34, TPKT=0x45, TBYT=0x64, R64=0x06, T64=0x3f etc. S-Channel address formula and port→block/lane mapping confirmed. See `STATS_COUNTER_FORMAT.md` |
+| **A/B slot upgrade procedure** | ✅ Documented in §10.4. `fw_setenv cl.active 2` → write inactive sda7/sda8 → reboot; rollback via `cl.active 1` from ONIE shell |
+| **VLAN table RE data** | ✅ Ingress VLAN 0x12168000 (4096×40B), EGR_VLAN 0x0d260000 (4096×29B), PORT_BITMAP + ING_PORT_BITMAP + UT_PORT_BITMAP bit positions all verified. See `VLAN_TABLE_FORMAT.md` |
+| **PPC32 kernel version** | ✅ We write our own BDE; no external BDE version dependency |
+| **mb_led_rst GPIO** | ✅ Not found under sysfs on live switch; skip LED reset if GPIO absent; non-fatal |
 
 ---
 
