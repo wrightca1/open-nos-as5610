@@ -93,15 +93,15 @@
 
 | Component | Source | License | Notes |
 |-----------|--------|---------|-------|
-| **Linux kernel** | upstream kernel.org | GPL-2.0 | PPC32 big-endian; ONL or Yocto build; must support tun.ko, i2c |
-| **FRRouting (FRR)** | github.com/FRRouting/frr | GPL-2.0 / LGPL | BGP, OSPF, ISIS, static, BFD |
-| **iproute2** | kernel.org | GPL-2.0 | ip, bridge, tc commands |
-| **ifupdown2** | github.com/CumulusNetworks/ifupdown2 | GPL-2.0 | Interface configuration (this is Cumulus-released OSS) |
-| **lldpd** | github.com/lldpd/lldpd | ISC | LLDP |
+| **Linux kernel** | upstream kernel.org | GPL-2.0 | PPC32 big-endian, cross-compiled; must support tun.ko, i2c, PCI |
+| **Debian 12 (Bookworm) PPC32** | debian.org | Various (all OSS) | Base rootfs — `debootstrap --arch powerpc`; provides dpkg/apt, libc, all userspace |
+| **FRRouting (FRR)** | github.com/FRRouting/frr | GPL-2.0 / LGPL | BGP, OSPF, ISIS, static, BFD — installed as Debian package |
+| **iproute2** | kernel.org | GPL-2.0 | Debian package |
+| **ifupdown2** | github.com/CumulusNetworks/ifupdown2 | GPL-2.0 | Interface configuration — Debian package |
+| **lldpd** | github.com/lldpd/lldpd | ISC | LLDP — Debian package |
 | **ONIE** | github.com/opencomputeproject/onie | GPL-2.0 | Bootloader framework (already on switch) |
 | **u-boot** | u-boot.org | GPL-2.0 | Already on switch; we only need fw_setenv |
-| **Buildroot / Yocto** | buildroot.org / yoctoproject.org | Various | Root filesystem build for PPC32 |
-| **OpenNetworkLinux (ONL)** | github.com/opennetworklinux/ONL | Apache 2.0 | Platform infra, ONLP, PPC kernel build pipeline |
+| **OpenNetworkLinux (ONL)** | github.com/opennetworklinux/ONL | Apache 2.0 | Reference for ONLP platform code |
 | **ONLP** | ONL project | Apache 2.0 | Platform abstraction library (thermal/PSU/fan/SFP) |
 
 ### We Write (our code, from RE docs)
@@ -785,53 +785,109 @@ cl.platform=accton_as5610_52x
 
 ## 11. Build System
 
-### 11.1 Toolchain
+### 11.1 Rootfs: Debian 12 (Bookworm) PPC32
 
-Target architecture: `powerpc-linux-gnu` (PPC32 big-endian, soft-float or hardfp depending on kernel config)
+The rootfs is a Debian 12 (Bookworm) system bootstrapped for `powerpc` (PPC32 big-endian).
+Debian maintains a full PPC32 archive with all the packages we need.
 
-Options:
-- **Buildroot** (recommended for simplicity): configure for `powerpc_e500v2` target
-- **Yocto** (more flexible): `MACHINE = "p2020rdb"` or similar P2020 machine
+**Bootstrap flow** (runs on x86 build host):
 
-### 11.2 Kernel Configuration
+```bash
+# Stage 1: foreign debootstrap on x86
+debootstrap --arch=powerpc --foreign bookworm /mnt/rootfs \
+    http://deb.debian.org/debian
 
-Key options:
+# Stage 2: complete inside QEMU user-mode emulation
+cp /usr/bin/qemu-ppc-static /mnt/rootfs/usr/bin/
+chroot /mnt/rootfs /debootstrap/debootstrap --second-stage
+
+# Stage 3: install NOS packages
+chroot /mnt/rootfs apt-get install -y \
+    frr \
+    iproute2 \
+    ifupdown2 \
+    lldpd \
+    openssh-server \
+    python3 \
+    ethtool \
+    tcpdump \
+    i2c-tools \
+    libpci-dev
+
+# Stage 4: install our own .deb packages
+dpkg --root=/mnt/rootfs -i \
+    nos-switchd_*.deb \
+    libbcm56846_*.deb \
+    platform-mgrd_*.deb
+
+# Stage 5: pack to squashfs
+mksquashfs /mnt/rootfs sysroot.squash.xz -comp xz
 ```
-CONFIG_PPC32=y
-CONFIG_E500=y                  # Freescale P2020 (e500v2 core)
-CONFIG_PCI=y
-CONFIG_NET_VENDOR_BROADCOM=n   # We don't use BCM ethernet drivers
-CONFIG_TUN=y                   # TUN/TAP for swp interfaces
-CONFIG_I2C=y
-CONFIG_I2C_MUX=y
-CONFIG_SFP=y
-CONFIG_HWMON=y
-CONFIG_PROC_FS=y
-CONFIG_SYSFS=y
+
+**Why Debian 12:**
+- Full PPC32 package archive — FRR, iproute2, lldpd, openssh all install with `apt`
+- `dpkg` means our own code (SDK, switchd) ships as versioned `.deb` packages
+- Security updates via `apt upgrade` — no rebuild required for CVE fixes
+- Same approach as Cumulus (Debian 7) and ONL (Debian 8), but on a supported release
+- `debootstrap` + QEMU user-mode is the standard cross-bootstrap method for PPC32
+
+### 11.2 Toolchain
+
+Cross-compiler: `powerpc-linux-gnu-gcc` (from `gcc-powerpc-linux-gnu` Debian package on build host)
+
+```bash
+# Install on build host (x86 Debian/Ubuntu)
+apt-get install gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
+                qemu-user-static debootstrap
 ```
 
-### 11.3 Build Targets
+### 11.3 Kernel Build
 
-```makefile
-# Kernel
-make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- uImage
+```bash
+# Linux 5.10 LTS for PPC32 e500v2
+make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
+     p2020rdb_defconfig        # baseline for P2020; then customize
 
-# BDE modules (from OpenNSL)
-make -C linux-kernel-bde ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu-
-make -C linux-user-bde   ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu-
+make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
+     uImage modules
 
-# Our SDK
+# Key config options:
+# CONFIG_PPC32=y
+# CONFIG_E500=y               Freescale P2020 (e500v2 core)
+# CONFIG_PCI=y
+# CONFIG_NET_VENDOR_BROADCOM=n  we don't use BCM ethernet drivers
+# CONFIG_TUN=y                TUN/TAP for swp interfaces
+# CONFIG_I2C=y, CONFIG_I2C_MUX=y
+# CONFIG_SFP=y
+# CONFIG_HWMON=y
+```
+
+### 11.4 Our Code: .deb Packages
+
+Our components ship as Debian packages, cross-built with the PPC32 toolchain:
+
+```bash
+# SDK
 cd sdk && cmake -DCMAKE_TOOLCHAIN_FILE=../tools/ppc32-toolchain.cmake ..
-make
+make && make package   # produces libbcm56846_1.0.0_powerpc.deb
 
-# Our switchd
+# switchd
 cd switchd && cmake -DCMAKE_TOOLCHAIN_FILE=../tools/ppc32-toolchain.cmake ..
-make
+make && make package   # produces nos-switchd_1.0.0_powerpc.deb
 
-# FRR (cross-compiled via Buildroot package)
+# BDE modules
+make -C bde ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
+     KERNEL_SRC=/path/to/linux-5.10
+# produces nos-bde-modules_1.0.0_powerpc.deb (DKMS or pre-built)
+```
 
-# ONIE installer assembly
+### 11.5 ONIE Installer Assembly
+
+```bash
 cd onie-installer && ./build.sh
+# Inputs:  uImage-powerpc.itb  (kernel FIT image)
+#          sysroot.squash.xz   (Debian 12 rootfs + our packages)
+# Output:  open-nos-as5610-YYYYMMDD.bin
 ```
 
 ---
