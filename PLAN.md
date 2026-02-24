@@ -241,7 +241,7 @@ Without eth0, the switch has no management access after install (no console on m
 
 ## 4. Implementation Phases
 
-### Phase 0 — Build Environment (Week 1)
+### Phase 0 — Build Environment
 
 - [ ] Set up PPC32 big-endian cross-compilation toolchain (Buildroot or Yocto)
 - [ ] Verify toolchain produces PPC32 BE binaries: `powerpc-linux-gnu-gcc` or `powerpc-buildroot-linux-gnu-gcc`
@@ -252,9 +252,9 @@ Without eth0, the switch has no management access after install (no console on m
 
 **Deliverable**: Cross-compilation toolchain, kernel build, BDE modules that load on target.
 
-### Phase 1 — Boot + Kernel + Our BDE (Weeks 2–4)
+### Phase 1 — Boot + Kernel + Our BDE
 
-#### 1a — Kernel + DTB + initramfs + Basic Boot (Week 2)
+#### 1a — Kernel + DTB + initramfs + Basic Boot
 - [ ] Build Linux 5.10 LTS kernel for PPC32 e500v2 target with required `CONFIG_*` options
 - [ ] **Device Tree Blob (DTB)**: Obtain or build the P2020-based DTB for the AS5610-52X. The FIT image (`uImage-powerpc.itb`) must bundle `kernel + dtb + initramfs` using `mkimage -f`. Without a correct DTB, Linux cannot enumerate the P2020 SoC peripherals (eTSEC eth0, I2C buses, CPLD local bus, PCIe). Reference: ONL tree has `as5610_52x.dts`; alternatively extract from Cumulus FIT image with `dumpimage -l`.
 - [ ] **initramfs**: Build a minimal initramfs that mounts the squashfs rootfs and overlayfs before `pivot_root`. Without this the switch cannot boot from the A/B squashfs layout. Contents: `busybox`, mount helpers, `pivot_root`. The initramfs is embedded in the FIT image. Steps:
@@ -268,7 +268,7 @@ Without eth0, the switch has no management access after install (no console on m
 - [ ] Load `tun.ko`, create a test TUN device, confirm kernel networking works
 - [ ] Confirm `eth0` comes up (P2020 eTSEC — management interface, see §3.5)
 
-#### 1b — Write nos-kernel-bde.ko (Week 3)
+#### 1b — Write nos-kernel-bde.ko
 - [ ] PCI probe: match `PCI_VENDOR_ID_BROADCOM, 0xb846`; call `pci_enable_device()`, `pci_request_regions()`
 - [ ] BAR0 map: `ioremap(pci_resource_start(dev, 0), 256*1024)` → confirm VA reads back `0xa0000000`
 - [ ] DMA pool: `dma_alloc_coherent(8MB)` → store `_dma_vbase`, `_dma_pbase`; wrap with slab sub-allocator
@@ -276,23 +276,23 @@ Without eth0, the switch has no management access after install (no console on m
 - [ ] S-Channel submit: write command to DMA buffer; write `CMICM_DMA_DESC0`; write `CMICM_DMA_CTRL |= START`; wait for IRQ or poll `CMICM_DMA_STAT`
 - [ ] Export symbols for `nos-user-bde.ko`
 
-#### 1c — Write nos-user-bde.ko (Week 3)
+#### 1c — Write nos-user-bde.ko
 - [ ] Create char device `/dev/nos-bde` via `cdev_init()` + `cdev_add()`
 - [ ] Implement ioctls: `NOS_BDE_READ_REG`, `NOS_BDE_WRITE_REG`, `NOS_BDE_GET_DMA_INFO`, `NOS_BDE_SCHAN_OP`
 - [ ] Implement `mmap()` handler: map DMA pool physical pages to user VMA
 
-#### 1d — Validation (Week 4)
+#### 1d — Validation
 - [ ] Write C test: open `/dev/nos-bde`, `NOS_BDE_READ_REG(0)` → expect PCI config data
 - [ ] Write C test: mmap DMA pool, write pattern, read back
 - [ ] Write C test: read CMIC register `0x32800` (S-Channel control) → confirms BAR0 accessible
 
 **Deliverable**: Our own BDE operational on hardware. Can read/write CMIC registers and access DMA pool from userspace.
 
-### Phase 2 — Custom SDK Core: libbcm56846 (Weeks 4–10)
+### Phase 2 — Custom SDK Core: libbcm56846
 
 This is the longest phase. Build incrementally, test on hardware after each sub-module.
 
-#### 2a — S-Channel and Register Access (Week 4)
+#### 2a — S-Channel and Register Access
 - [ ] Implement `schan_write(unit, cmd_word, data_words[], len)` using BDE ioctl + DMA
 - [ ] Implement `schan_read(unit, addr, data_words[], len)`
 - [ ] Implement `reg_write32(unit, offset, value)` and `reg_read32()` via BDE mmap
@@ -301,7 +301,7 @@ This is the longest phase. Build incrementally, test on hardware after each sub-
 Key data: `../edgecore-5610-re/SCHAN_FORMAT_ANALYSIS.md`, `../edgecore-5610-re/WRITE_MECHANISM_ANALYSIS.md`
 S-Channel command word format: `0x2800XXXX`; DMA path: `FUN_10324084` → `FUN_103257B8`
 
-#### 2b — ASIC Init (Week 5)
+#### 2b — ASIC Init
 - [ ] Implement `bcm56846_attach(unit)`: open BDE, mmap BAR0, get DMA info
 - [ ] Implement `bcm56846_init(unit)`: load .bcm config, set up tables, configure pipeline
 - [ ] Implement SOC script runner: parse `rc.soc`, `rc.ports_0`, `rc.datapath_0`, `rc.forwarding`
@@ -313,7 +313,7 @@ S-Channel command word format: `0x2800XXXX`; DMA path: `FUN_10324084` → `FUN_1
 
 Key data: `../edgecore-5610-re/initialization-sequence.md`, `../edgecore-5610-re/SDK_AND_ASIC_CONFIG_FROM_SWITCH.md`
 
-#### 2c — Port Bringup + SerDes (Week 6)
+#### 2c — Port Bringup + SerDes
 - [ ] Implement XLPORT/MAC register writes for port enable/disable
 - [ ] Implement Warpcore WC-B0 SerDes MDIO init sequence (10G SFI mode)
 - [ ] Implement 40G port init (QSFP breakout)
@@ -323,7 +323,7 @@ Key data: `../edgecore-5610-re/initialization-sequence.md`, `../edgecore-5610-re
 Key data: `../edgecore-5610-re/PORT_BRINGUP_REGISTER_MAP.md`, `../edgecore-5610-re/SERDES_WC_INIT.md`
 XLPORT formula: `block_base + 0x80000 + port_offset`; SerDes MDIO pages: 0x0008, 0x0a00, 0x1000, 0x3800
 
-#### 2d — L2 Table (Week 7)
+#### 2d — L2 Table
 - [ ] Implement `bcm56846_l2_addr_add(unit, l2_addr)`: pack L2_ENTRY bitfields, issue S-Channel WRITE
 - [ ] Implement `bcm56846_l2_addr_delete(unit, mac, vid)`: compute hash key, issue S-Channel DELETE
 - [ ] Implement `bcm56846_l2_addr_get(unit, mac, vid, l2_addr)`: hash lookup + S-Channel READ
@@ -333,7 +333,7 @@ XLPORT formula: `block_base + 0x80000 + port_offset`; SerDes MDIO pages: 0x0008,
 Key data: `../edgecore-5610-re/L2_ENTRY_FORMAT.md`, `../edgecore-5610-re/L2_WRITE_PATH_COMPLETE.md`
 L2_ENTRY: 131072 entries × 13 bytes, base `0x07120000`; KEY = `(MAC<<16)|(VLAN<<4)|(KEY_TYPE<<1)`
 
-#### 2e — L3 / ECMP (Week 8)
+#### 2e — L3 / ECMP
 - [ ] Implement `bcm56846_l3_egress_create()`: write ING_L3_NEXT_HOP + EGR_L3_NEXT_HOP + EGR_L3_INTF
 - [ ] Implement `bcm56846_l3_route_add()`: write L3_DEFIP TCAM entry with prefix/mask
 - [ ] Implement `bcm56846_l3_route_delete()`: delete L3_DEFIP entry
@@ -345,7 +345,7 @@ Key data: `../edgecore-5610-re/L3_NEXTHOP_FORMAT.md`, `../edgecore-5610-re/L3_EC
 Chain: `L3_DEFIP[prefix] → NEXT_HOP_INDEX → ING_L3_NEXT_HOP[idx] → PORT_NUM[22:16]`
 EGR chain: `EGR_L3_NEXT_HOP[idx] → DA_MAC[62:15] + INTF_NUM[14:3] → EGR_L3_INTF[intf] → SA_MAC[80:33] + VLAN[24:13]`
 
-#### 2f — Packet I/O (Week 9)
+#### 2f — Packet I/O
 - [ ] Implement DMA ring setup for TX and RX channels (DCB layout from KNET source)
 - [ ] Implement `bcm56846_tx(unit, pkt, pkt_len, port)`: copy packet to DMA buffer, ring descriptor, start DMA
 - [ ] Implement RX: register DMA completion callback, deliver packet + ingress port metadata
@@ -355,13 +355,13 @@ EGR chain: `EGR_L3_NEXT_HOP[idx] → DA_MAC[62:15] + INTF_NUM[14:3] → EGR_L3_I
 Key data: `../edgecore-5610-re/DMA_DCB_LAYOUT_FROM_KNET.md`, `../edgecore-5610-re/PACKET_BUFFER_ANALYSIS.md`
 DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointer + metadata
 
-#### 2g — VLAN (Week 10)
+#### 2g — VLAN
 - [ ] Implement `bcm56846_vlan_create(unit, vid)`
 - [ ] Implement `bcm56846_vlan_port_add(unit, vid, port, tagged)`
 - [ ] Implement `bcm56846_vlan_destroy(unit, vid)`
 - [ ] Test: create VLAN, add ports, verify inter-VLAN and intra-VLAN forwarding
 
-### Phase 3 — nos-switchd (Weeks 11–13)
+### Phase 3 — nos-switchd
 
 - [ ] TUN device creation: open `/dev/net/tun`, `ioctl(TUNSETIFF, "swp1")` × 52 (+ breakout)
 - [ ] Port configuration reader: parse `ports.conf` → build port-to-BCM-port map (porttab)
@@ -379,7 +379,7 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 
 **Deliverable**: nos-switchd running. Ping across two directly connected ports works entirely in hardware.
 
-### Phase 4 — Routing Protocols + Integration (Week 14–15)
+### Phase 4 — Routing Protocols + Integration
 
 - [ ] Build FRR for PPC32 target
 - [ ] Configure FRR: BGP + OSPF basic config
@@ -390,7 +390,7 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 
 **Deliverable**: Full L3 routing stack. BGP peers can be established and traffic routes in hardware.
 
-### Phase 5 — Platform Management (Week 16)
+### Phase 5 — Platform Management
 
 - [ ] Integrate ONLP (accton_as5610_52x platform) or write platform-mgrd
 - [ ] Thermal monitoring daemon: read 10 temperature sensors; trigger fan speed adjustments
@@ -401,7 +401,7 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 
 Key data: `../edgecore-5610-re/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`, `../edgecore-5610-re/SFP_TURNUP_AND_ACCESS.md`
 
-### Phase 6 — ONIE Installer (Week 17)
+### Phase 6 — ONIE Installer
 
 - [ ] Write `install.sh`: self-extracting shell script, detect platform, partition, install kernel+rootfs
 - [ ] Write `platform.conf` for accton_as5610_52x (partition layout from RE docs)
