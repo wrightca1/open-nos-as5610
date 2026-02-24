@@ -185,8 +185,9 @@ Replaces Cumulus `switchd`. Written in C. Responsibilities:
 1. **Startup**: Load port configuration from `ports.conf`, build port-to-BCM-port map.
 2. **TUN creation**: Open `/dev/net/tun`, `ioctl(TUNSETIFF)` for each port (`swp1..swp52`, breakout `swp49s0..swp49s3`, etc.).
 3. **SDK init**: Call `bcm56846_attach()`, `bcm56846_init()`, run SOC script sequences.
-4. **Netlink listener**: Subscribe to `RTMGRP_LINK`, `RTMGRP_IPV4_ROUTE`, `RTMGRP_IPV6_ROUTE`, `RTMGRP_NEIGH`; dispatch to SDK calls.
-5. **Packet I/O**: Read from TUN fds (TX path) and write to TUN fds (RX path).
+4. **Netlink listener**: Subscribe to `RTMGRP_LINK | RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE | RTMGRP_NEIGH | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR`; dispatch to SDK calls.
+5. **Link state polling loop**: RTM_NEWLINK fires only on admin-state changes, not physical link transitions. A dedicated poll thread calls `bcm56846_port_link_status_get()` every ~200 ms for all ports and synthesizes link-up/down events when physical link changes, triggering neighbor flush and FRR convergence.
+6. **Packet I/O**: Read from TUN fds (TX path) and write to TUN fds (RX path).
 
 Netlink event → SDK call mapping:
 
@@ -194,10 +195,14 @@ Netlink event → SDK call mapping:
 |---------------|-------------------|----------|
 | `RTM_NEWLINK` (IFF_UP) | Port admin up | `bcm56846_port_enable_set(port, 1)` |
 | `RTM_NEWLINK` (IFF_DOWN) | Port admin down | `bcm56846_port_enable_set(port, 0)` |
+| `RTM_NEWADDR` | IP assigned to swp/SVI → create L3 intf | `bcm56846_l3_intf_create()` → write `EGR_L3_INTF` (SA_MAC + VLAN) |
+| `RTM_DELADDR` | IP removed → destroy L3 intf if last user | `bcm56846_l3_intf_destroy()` |
 | `RTM_NEWROUTE` | Add L3 route; resolve nexthop; create egress if needed | `bcm56846_l3_egress_create()` → `bcm56846_l3_route_add()` |
 | `RTM_DELROUTE` | Remove L3 route | `bcm56846_l3_route_delete()` |
 | `RTM_NEWNEIGH` | Learn/update L2/L3 neighbor | `bcm56846_l2_addr_add()` and/or `bcm56846_l3_host_add()` |
 | `RTM_DELNEIGH` | Remove neighbor | `bcm56846_l2_addr_delete()` |
+
+**RTM_NEWADDR / SVI creation**: When the kernel assigns an IP to an interface (`ip addr add 10.0.0.1/24 dev swp1`), we receive `RTM_NEWADDR`. We must create an `EGR_L3_INTF` entry containing the interface's MAC (from the preceding `RTM_NEWLINK` for that ifindex) and VLAN. This entry is referenced by all egress next-hop objects that exit this interface. Without `RTMGRP_IPV4_IFADDR` in the netlink subscription, L3 routing silently fails even when routes are installed correctly.
 
 See: `../edgecore-5610-re/netlink-handlers.md`, `../edgecore-5610-re/api-patterns.md`
 
@@ -217,6 +222,20 @@ If using ONLP: the `onlp_platform_init()` for accton_as5610_52x is available in 
 
 See: `../edgecore-5610-re/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`, `../edgecore-5610-re/SFP_TURNUP_AND_ACCESS.md`
 
+### 3.5 Management Interface (eth0)
+
+The AS5610-52X CPU (Freescale P2020) has a dedicated out-of-band management Ethernet port driven by the P2020's eTSEC (enhanced Three-Speed Ethernet Controller). This is completely separate from the BCM56846 switch ports. It appears as `eth0` in Linux and is the primary SSH/management interface.
+
+**This interface is not mentioned elsewhere in the original plan and must be explicitly supported:**
+
+- **Driver**: `gianfar` (Freescale eTSEC driver) — included in mainline Linux PPC32 builds with `CONFIG_GIANFAR=y`
+- **DTB**: The eTSEC PHY node must appear in the Device Tree (`enet0`, `enet1` nodes on P2020); correct MAC address from EEPROM or U-Boot `ethaddr` variable
+- **Kernel config**: `CONFIG_GIANFAR=y`, `CONFIG_NET_VENDOR_FREESCALE=y`
+- **ifupdown2 config**: `/etc/network/interfaces` entry for `eth0` (DHCP or static)
+- **Firewall**: SSH access restricted to eth0 by default; swp interfaces for transit/routing only
+
+Without eth0, the switch has no management access after install (no console on most rack deployments).
+
 ---
 
 ## 4. Implementation Phases
@@ -234,11 +253,19 @@ See: `../edgecore-5610-re/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`, `../edgecor
 
 ### Phase 1 — Boot + Kernel + Our BDE (Weeks 2–4)
 
-#### 1a — Kernel + Basic Boot (Week 2)
+#### 1a — Kernel + DTB + initramfs + Basic Boot (Week 2)
 - [ ] Build Linux 5.10 LTS kernel for PPC32 e500v2 target with required `CONFIG_*` options
-- [ ] Boot via ONIE (temporary minimal installer) or Cumulus (replace userspace only)
+- [ ] **Device Tree Blob (DTB)**: Obtain or build the P2020-based DTB for the AS5610-52X. The FIT image (`uImage-powerpc.itb`) must bundle `kernel + dtb + initramfs` using `mkimage -f`. Without a correct DTB, Linux cannot enumerate the P2020 SoC peripherals (eTSEC eth0, I2C buses, CPLD local bus, PCIe). Reference: ONL tree has `as5610_52x.dts`; alternatively extract from Cumulus FIT image with `dumpimage -l`.
+- [ ] **initramfs**: Build a minimal initramfs that mounts the squashfs rootfs and overlayfs before `pivot_root`. Without this the switch cannot boot from the A/B squashfs layout. Contents: `busybox`, mount helpers, `pivot_root`. The initramfs is embedded in the FIT image. Steps:
+  - Assemble initramfs tree: `busybox sh`, `mount`, `switch_root`
+  - Mount squashfs: `mount -t squashfs /dev/sda6 /newroot -o ro`
+  - Mount overlayfs: `mount -t overlay overlay -o lowerdir=/newroot,upperdir=/dev/sda3/upper,workdir=/dev/sda3/work /newroot`
+  - `exec switch_root /newroot /sbin/init`
+- [ ] Pack FIT image: `mkimage -f nos.its nos-powerpc.itb` (`.its` references kernel, dtb, initramfs by path)
+- [ ] Boot via ONIE (temporary minimal installer) or test netboot
 - [ ] Confirm PCI device visible: `lspci | grep 14e4:b846`
 - [ ] Load `tun.ko`, create a test TUN device, confirm kernel networking works
+- [ ] Confirm `eth0` comes up (P2020 eTSEC — management interface, see §3.5)
 
 #### 1b — Write nos-kernel-bde.ko (Week 3)
 - [ ] PCI probe: match `PCI_VENDOR_ID_BROADCOM, 0xb846`; call `pci_enable_device()`, `pci_request_regions()`
@@ -278,6 +305,9 @@ S-Channel command word format: `0x2800XXXX`; DMA path: `FUN_10324084` → `FUN_1
 - [ ] Implement `bcm56846_init(unit)`: load .bcm config, set up tables, configure pipeline
 - [ ] Implement SOC script runner: parse `rc.soc`, `rc.ports_0`, `rc.datapath_0`, `rc.forwarding`
 - [ ] Implement `setreg`/`getreg` SOC commands (for stats config, LED init)
+- [ ] **config.bcm portmap entries**: The live switch `config.bcm` contains all 52 `portmap_N.0=...` entries (e.g., `portmap_1.0=65:10`, `portmap_49.0=17:40`). Without these entries, `bcm_init` segfaults during port enumeration. We have the complete portmap captured from the live switch in `../edgecore-5610-re/SDK_AND_ASIC_CONFIG_FROM_SWITCH.md`. These must be included verbatim in our `config.bcm` shipped in the rootfs.
+- [ ] **rc.datapath_0**: This file configures the datapath pipeline (parser, deparser, field processor enables, cos mapping). On Cumulus it is auto-generated by switchd on first boot or loaded from `/var/lib/cumulus/rc.datapath_0`. We have the content from live switch capture. Ship a static pre-generated `rc.datapath_0` in the rootfs at `/etc/nos/rc.datapath_0`; nos-switchd's SOC runner loads it verbatim.
+- [ ] **LED programs**: Ship `led0.hex` and `led1.hex` in `/etc/nos/` (captured from live switch: led0.asm=5104B, led1.asm=5223B). The SOC init sequence `rcload rc.led` uploads these to the ASIC LED microcontroller. Without them, port LEDs are dark but switching still works.
 - [ ] Test: ASIC initializes, no crash, registers read back expected values
 
 Key data: `../edgecore-5610-re/initialization-sequence.md`, `../edgecore-5610-re/SDK_AND_ASIC_CONFIG_FROM_SWITCH.md`
@@ -334,12 +364,15 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 
 - [ ] TUN device creation: open `/dev/net/tun`, `ioctl(TUNSETIFF, "swp1")` × 52 (+ breakout)
 - [ ] Port configuration reader: parse `ports.conf` → build port-to-BCM-port map (porttab)
-- [ ] Netlink socket setup: `RTMGRP_LINK | RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE | RTMGRP_NEIGH`
+- [ ] Netlink socket setup: `RTMGRP_LINK | RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE | RTMGRP_NEIGH | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR`
 - [ ] RTM_NEWLINK handler → `bcm56846_port_enable_set()`
+- [ ] **RTM_NEWADDR handler** → `bcm56846_l3_intf_create()`: extract ifindex, look up MAC from port table, create `EGR_L3_INTF` entry (SA_MAC + VLAN). This is required before any routes via that interface can be programmed into the ASIC.
+- [ ] RTM_DELADDR handler → `bcm56846_l3_intf_destroy()` if reference count drops to zero
 - [ ] RTM_NEWROUTE handler → egress create + route add (with nexthop MAC resolution from neighbor table)
 - [ ] RTM_DELROUTE handler → route delete + egress destroy if last user
 - [ ] RTM_NEWNEIGH handler → `bcm56846_l2_addr_add()` + `bcm56846_l3_host_add()` (for ARP/NDP)
 - [ ] RTM_DELNEIGH handler → delete L2/L3 host entries
+- [ ] **Link state polling thread**: poll `bcm56846_port_link_status_get()` at 200 ms intervals for all ports; on state change, update TUN carrier (`SIOCSIFFLAGS`), flush neighbors on that port, notify FRR via `RTM_NEWLINK`
 - [ ] TX thread: `epoll` on all TUN fds; on read → `bcm56846_tx()`
 - [ ] RX thread: `bcm56846_rx_start()`; on packet → write to correct TUN fd based on ingress port
 
@@ -540,6 +573,11 @@ nos-switchd main process
 ├── netlink thread
 │   ├── poll(netlink_fd)
 │   └── RTM_* dispatch → SDK API calls (serialized via mutex)
+│       RTM_NEWLINK, RTM_NEWADDR/DELADDR, RTM_NEWROUTE/DELROUTE, RTM_NEWNEIGH/DELNEIGH
+├── link-state poll thread          ← NEW: physical link monitoring
+│   ├── sleep(200ms)
+│   ├── for each port: bcm56846_port_link_status_get()
+│   └── on change: SIOCSIFFLAGS on TUN, flush neighbors, notify FRR
 ├── tx thread
 │   ├── epoll(all TUN fds)
 │   └── on readable → bcm56846_tx()
@@ -781,6 +819,28 @@ bootsource=flashboot
 cl.platform=accton_as5610_52x
 ```
 
+### 10.4 A/B Slot Upgrade Procedure
+
+The two-slot layout (A=sda5/6, B=sda7/8) enables in-service upgrades without risk of bricking:
+
+```
+Current active: slot A (cl.active=1 → U-Boot boots sda5/sda6)
+
+Upgrade steps:
+1. Download new image to running system
+2. Write kernel to inactive slot B: dd if=nos-powerpc.itb of=/dev/sda7
+3. Write rootfs to inactive slot B: dd if=sysroot.squash.xz of=/dev/sda8
+4. Set U-Boot active slot: fw_setenv cl.active 2
+5. Reboot → U-Boot reads cl.active=2 → boots sda7/sda8
+6. Verify new version works
+7. (Optional rollback: fw_setenv cl.active 1 && reboot)
+8. After verification: fw_setenv cl.active 2 (permanent)
+```
+
+**Rollback**: If the new slot fails to boot, U-Boot increments a boot counter. After N failed boots it can revert to the previous slot (requires U-Boot scripting in `bootcmd`). Alternatively, operator runs `fw_setenv cl.active 1` from ONIE rescue shell.
+
+The `rw-overlay` partition (sda3) is shared between both slots. On a slot switch, the overlay may contain stale files from the previous version. The upgrade script should wipe sda3 or use a per-slot overlay directory.
+
 ---
 
 ## 11. Build System
@@ -927,15 +987,49 @@ In order of increasing complexity:
 
 ## 13. Known Gaps and Risk Register
 
-| Gap | Risk | Mitigation |
-|-----|------|-----------|
-| **Packet I/O DCB exact format** | Medium — KNET DCB format documented in OpenNSL source but may differ for our BDE usage without KNET | Study OpenNSL KNET source; trace BDE ioctl during Cumulus packet I/O with strace |
-| **S-Channel DMA completion** | Medium — command queueing and semaphore protocol understood; interrupt/poll details need implementation | OpenNSL SDK source (the non-hardware parts) can be referenced; BDE ioctl interface handles most of this |
-| **VLAN table format** | Low — VLAN_XLATE not used in pure L3 mode; basic VLAN needed for L2 | Start with VLAN-unaware L3 forwarding; add VLAN table programming from OpenNSL source struct layout |
-| **Stats/counter registers** | Low — not needed for basic operation | Add after core forwarding works; use OpenNSL source for counter register offsets |
-| **ACL / Field Processor** | Low — advanced feature not needed for basic routing | Defer to future phase |
-| **PPC32 kernel version** | Low — we write our own BDE so we control kernel API compatibility completely; target Linux 5.10 LTS | No dependency on third-party BDE version; we fix any kernel API changes ourselves |
-| **mb_led_rst GPIO** | Low — not found under sysfs on live switch; may be different path | Test on our own boot; workaround is skip LED reset if GPIO not found |
+### 13.1 Critical Gaps (switch will not function without these)
+
+| Gap | Risk | Status | Mitigation |
+|-----|------|--------|-----------|
+| **initramfs** | High — without initramfs the kernel cannot mount squashfs+overlayfs and panics at boot | **Added to Phase 1** | Build minimal busybox initramfs; embed in FIT image; mount squashfs ro + overlayfs rw then pivot_root |
+| **Device Tree Blob (DTB)** | High — without DTB the PPC32 kernel cannot enumerate P2020 SoC peripherals (eTSEC, I2C, PCIe, CPLD) | **Added to Phase 1** | Extract from Cumulus FIT image via `dumpimage -l` + patch, or build from ONL's `as5610_52x.dts` |
+| **config.bcm portmap entries** | High — `bcm_init` segfaults during port enumeration without correct `portmap_N.0=...` lines | **Added to Phase 2b** | All 52 portmap entries captured from live switch; ship verbatim in `/etc/nos/config.bcm` |
+| **RTM_NEWADDR / RTMGRP_IPV4_IFADDR** | High — without this netlink subscription, `EGR_L3_INTF` is never created; L3 routing silently broken | **Added to §3.3 and Phase 3** | Subscribe to `RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR`; handle `RTM_NEWADDR` to create `EGR_L3_INTF` |
+| **Link state polling loop** | High — without it, physical link-down events are never seen by FRR; BGP stays up on dead links | **Added to §3.3 and Phase 3** | Dedicated thread polls `bcm56846_port_link_status_get()` at 200 ms; synthesizes link events for FRR |
+| **rc.datapath_0** | High — without this SOC script the datapath pipeline is unconfigured; no packet forwarding | **Added to Phase 2b** | Ship static pre-generated file from live switch capture at `/etc/nos/rc.datapath_0` |
+| **Management interface (eth0)** | High — without eth0 there is no way to SSH into the switch after install | **Added to §3.5** | Enable `CONFIG_GIANFAR=y`; DTB must have correct eTSEC nodes; ifupdown2 config for eth0 |
+
+### 13.2 Important Gaps (degraded functionality without these)
+
+| Gap | Risk | Status | Mitigation |
+|-----|------|--------|-----------|
+| **LED programs (led0.hex, led1.hex)** | Medium — port LEDs dark without them; switch still forwards | **Added to Phase 2b** | LED microcode captured from live switch (led0.asm=5104B, led1.asm=5223B); ship in `/etc/nos/` |
+| **IPv6 L3_DEFIP format** | Medium — IPv6 routes fail silently if MODE bit wrong | ⚠️ Needs verification | `L3_DEFIP` MODE bit=1 for IPv6; key is `(VRF<<33)|(IPv6_addr_128b)|MODE=1`; verify against live switch |
+| **Hardware stats → interface counters** | Medium — `ip -s link` shows zero counters; no rate monitoring | ⚠️ Deferred | Counter registers partially known; `bcm_stat_flags=0x1` in config.bcm enables collection; add after forwarding works |
+| **A/B slot upgrade procedure** | Medium — without upgrade path the switch is stuck on initial version | **Added to §10.4** | `fw_setenv cl.active 2` + write to inactive sda7/sda8; rollback by reverting `cl.active` |
+| **Serial console / UART** | Low — no console access during boot failures | ⚠️ DTB dependency | P2020 has DUART at 0xffe04500; DTB must define `serial0`; `CONFIG_SERIAL_8250=y`; baud 115200 |
+
+### 13.3 Deferred / Nice-to-Have
+
+| Item | Notes |
+|------|-------|
+| **ACL / Field Processor** | Advanced feature; defer to future phase |
+| **STP / RSTP** | Only needed for L2-switched deployments; FRR includes `pathd` / `bfdd` but not STP |
+| **LACP / LAG** | Bond interfaces; kernel bonding driver handles LACP; ASIC trunk group table needs programming |
+| **L2XMSG hardware MAC learning** | Hardware-assisted MAC learning via interrupt; start with software-only (ARP/NDP → neighbor table) |
+| **SNMP** | snmpd from Debian; MIBs need nos-switchd counter data |
+| **Zero Touch Provisioning (ZTP)** | DHCP option 239; useful for production deployments |
+| **Port watchdog** | CPLD watchdog: `watch_dog_enable` sysfs; reset if nos-switchd hangs |
+| **VLAN table format** | VLAN_XLATE not used in pure L3 mode; add when L2 switching needed |
+
+### 13.4 Low Risk / Resolved
+
+| Gap | Resolution |
+|-----|-----------|
+| **Packet I/O DCB exact format** | DCB layout from KNET source + strace on Cumulus packet I/O; format captured in `DMA_DCB_LAYOUT_FROM_KNET.md` |
+| **S-Channel DMA completion** | Protocol documented in `WRITE_MECHANISM_ANALYSIS.md`; GDB trace confirmed flow |
+| **PPC32 kernel version** | We write our own BDE; no external BDE version dependency |
+| **mb_led_rst GPIO** | Not found under sysfs on live switch; skip LED reset if GPIO absent; non-fatal |
 
 ---
 
@@ -968,8 +1062,8 @@ All RE docs are in `../edgecore-5610-re/` relative to this project.
 
 - **No Broadcom SDK code**: We write our own SDK (libbcm56846) from RE documentation and public specs.
 - **No Cumulus code**: We write our own installer, switchd, and platform tools from RE docs.
-- **BDE reuse**: The OpenNSL BDE (linux-kernel-bde.ko, linux-user-bde.ko) is open-source under the OpenNSL License, which permits use, modification, and redistribution.
-- **All other components** (Linux, FRR, iproute2, ONLP, Buildroot) are established open-source projects with permissive or copyleft licenses that permit redistribution.
+- **BDE written from scratch**: nos-kernel-bde.ko and nos-user-bde.ko are our own code, written from RE-documented register offsets. No OpenNSL or Broadcom BDE code included.
+- **All other components** (Linux, FRR, iproute2, ONLP, Debian) are established open-source projects with permissive or copyleft licenses that permit redistribution.
 - **RE methodology**: All findings obtained via legal analysis of hardware we own (see `../edgecore-5610-re/README.md`).
 
 ---
