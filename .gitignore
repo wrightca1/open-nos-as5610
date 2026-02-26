@@ -1,0 +1,23 @@
+# Build artifacts
+build/
+bde/*.ko
+bde/*.mod
+bde/*.mod.c
+bde/.*.cmd
+bde/.tmp_versions/
+onie-installer/open-nos-as5610-*.bin
+onie-installer/data.tar
+onie-installer/.data.*
+rootfs/staging/
+initramfs/root/
+initramfs/initramfs.cpio.gz
+boot/uImage
+boot/as5610_52x.dtb
+boot/initramfs.cpio.gz
+boot/nos-powerpc.itb
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

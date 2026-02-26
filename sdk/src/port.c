@@ -136,6 +136,8 @@ int bcm56846_port_enable_set(int unit, int port, int enable)
 	addr = base + XLPORT_PORT_ENABLE_OFF;
 	if (schan_write_memory(unit, addr, &val, 1) != 0)
 		return -EIO;
+	if (enable)
+		bcm56846_serdes_init_10g(unit, port);
 	return 0;
 }
 

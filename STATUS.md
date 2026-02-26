@@ -41,7 +41,7 @@
 ### Phase 2 — Custom SDK (libbcm56846)
 - **2a:** [x] S-Channel and register access (BDE ioctl)
 - **2b:** [x] Config loader + SOC runner (setreg/getreg); sample config.bcm. [ ] rc.datapath_0/LED from capture, test on HW
-- **2c–2g:** [x] Port (enable/link), L2 add/delete, L3/ECMP, pktio, VLAN. [ ] L2 get, stats, SerDes MDIO, HW tests.
+- **2c–2g:** [x] Port (enable/link), L2 add/delete, L3/ECMP, pktio, VLAN, SerDes MDIO (wc_b0 10G). [ ] 40G, L2 get/stats, HW tests.
 
 ### Phase 3 — nos-switchd
 - [x] TUN, ports.conf, netlink (NEWLINK, NEWADDR/DELADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr+cache), link-state, TX/RX. [x] SDK L2/L3/intf/ECMP/VLAN/port/pktio (Phase 2c–2g). [ ] L2 get, stats, HW validation.

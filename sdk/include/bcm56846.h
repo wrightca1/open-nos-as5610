@@ -18,6 +18,8 @@ void bcm56846_detach(int unit);
 int bcm56846_port_enable_set(int unit, int port, int enable);
 int bcm56846_port_speed_set(int unit, int port, int speed_mbps);
 int bcm56846_port_link_status_get(int unit, int port, int *link_up);
+/* SerDes (Warpcore WC-B0): 10G init; call after port enable for link. */
+int bcm56846_serdes_init_10g(int unit, int port);
 
 /* L2 */
 int bcm56846_l2_addr_add(int unit, const bcm56846_l2_addr_t *addr);

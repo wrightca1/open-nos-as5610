@@ -311,7 +311,7 @@ Key data: `../docs/reverse-engineering/initialization-sequence.md`, `../docs/rev
 
 #### 2c — Port Bringup + SerDes
 - [x] Implement XLPORT/MAC register writes for port enable/disable (S-Channel; XLPORT block map)
-- [ ] Implement Warpcore WC-B0 SerDes MDIO init sequence (10G SFI mode)
+- [x] Implement Warpcore WC-B0 SerDes MDIO init sequence (10G SFI mode) — `sdk/src/serdes.c`, `bcm56846_serdes_init_10g()`; called from port enable
 - [ ] Implement 40G port init (QSFP breakout)
 - [x] Implement `bcm56846_port_enable_set()`, `bcm56846_port_speed_set()`, `bcm56846_port_link_status_get()`
 - [ ] Test: `swp1` comes up, SFP transceiver negotiates, `ip link show swp1` shows LOWER_UP

@@ -19,6 +19,7 @@ set(SDK_SOURCES
   src/vlan.c
   src/pktio.c
   src/stats.c
+  src/serdes.c
 )
 
 add_library(bcm56846 SHARED ${SDK_SOURCES})
