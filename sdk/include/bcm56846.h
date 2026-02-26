@@ -24,6 +24,10 @@ int bcm56846_l2_addr_add(int unit, const bcm56846_l2_addr_t *addr);
 int bcm56846_l2_addr_delete(int unit, const uint8_t mac[6], uint16_t vid);
 int bcm56846_l2_addr_get(int unit, const uint8_t mac[6], uint16_t vid, bcm56846_l2_addr_t *out);
 
+/* L3 Interface (EGR_L3_INTF: SA_MAC + VLAN per interface) */
+int bcm56846_l3_intf_create(int unit, const uint8_t mac[6], uint16_t vid, int *intf_id);
+int bcm56846_l3_intf_destroy(int unit, int intf_id);
+
 /* L3 Egress */
 int bcm56846_l3_egress_create(int unit, const bcm56846_l3_egress_t *egress, int *egress_id);
 int bcm56846_l3_egress_destroy(int unit, int egress_id);

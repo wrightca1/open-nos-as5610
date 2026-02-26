@@ -9,11 +9,11 @@ Builds run on the same Debian build hosts used by ONL (see `../build-config.sh`)
 ./scripts/build-on-build-server.sh
 ```
 
-This syncs the repo to the server and runs the remote build. It will:
+This syncs the repo to the server and runs the remote build. **By default the full stack is built** (kernel + BDE + SDK + nos-switchd) so the switch can run our kernel and modules. It will:
 
 - Install PPC32 cross-toolchain on the server if missing (`gcc-powerpc-linux-gnu`)
 - Install cmake if missing (for SDK/switchd)
-- **Kernel + BDE**: only if `KERNEL_SRC` is set or `BUILD_KERNEL=1` (see below)
+- **Kernel + BDE**: built by default (`BUILD_KERNEL=1`). Set `BUILD_KERNEL=0` to skip (SDK + switchd only, for quick iteration).
 - **SDK (libbcm56846) + nos-switchd**: always built (PPC32 userspace)
 
 ### Providing a kernel tree for BDE
@@ -26,11 +26,11 @@ The BDE modules build against a Linux 5.10 (or compatible) kernel source tree. O
    ssh smiley@10.22.1.5 'cd open-nos-as5610-build-YYYYMMDD-HHMMSS && KERNEL_SRC=/path/to/linux ./scripts/remote-build.sh'
    ```
 
-2. **Let the script clone and build the kernel** (slow, first time only):
+2. **Let the script clone and build the kernel** (default; slow first time only):
    ```bash
-   BUILD_KERNEL=1 ./scripts/build-on-build-server.sh
+   ./scripts/build-on-build-server.sh
    ```
-   This clones mainline v5.10, runs `p2020rdb_defconfig`, builds `uImage` and modules, then builds the BDE.
+   Or explicitly: `BUILD_KERNEL=1 ./scripts/build-on-build-server.sh`. This clones mainline v5.10, runs a PPC 85xx defconfig, builds `uImage` and modules, then builds the BDE. Use `BUILD_KERNEL=0` to skip kernel+BDE and build only SDK + switchd.
 
 3. **Use modern Debian build host** (if toolchain on Debian 8 is too old):
    ```bash

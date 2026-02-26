@@ -8,7 +8,8 @@
 #
 # Options:
 #   USE_BUILD_SERVER=modern   Use 10.22.1.4 (default: debian8 → 10.22.1.5)
-#   BUILD_KERNEL=1            On server: clone and build Linux 5.10 (slow)
+#   BUILD_KERNEL=1            On server: clone and build Linux 5.10 (default: full build for switch)
+#   BUILD_KERNEL=0            Skip kernel+BDE; build only SDK + nos-switchd (quick iteration)
 #   KERNEL_SRC=/path          On server: use this kernel tree for BDE (no clone)
 #
 # Prereqs: SSH key to build server (smiley@10.22.1.5 or 10.22.1.4)
@@ -41,7 +42,8 @@ BUILD_USER="${BUILD_USER:-smiley}"
 
 # Remote directory: same layout as local
 REMOTE_DIR="open-nos-as5610-build-$(date +%Y%m%d-%H%M%S)"
-BUILD_KERNEL="${BUILD_KERNEL:-0}"
+# Default full build (kernel + BDE) for switch deployment; set BUILD_KERNEL=0 for SDK-only
+BUILD_KERNEL="${BUILD_KERNEL:-1}"
 KERNEL_SRC="${KERNEL_SRC:-}"
 
 log() { echo "[$(date +'%H:%M:%S')] $1"; }

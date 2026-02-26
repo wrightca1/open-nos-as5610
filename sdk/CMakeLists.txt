@@ -8,6 +8,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(SDK_SOURCES
   src/bde_ioctl.c
   src/attach.c
+  src/config.c
+  src/soc.c
   src/schan.c
   src/reg.c
   src/port.c

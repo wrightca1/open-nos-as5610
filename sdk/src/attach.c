@@ -2,7 +2,11 @@
 #include "bcm56846.h"
 #include "bde_ioctl.h"
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
+
+extern int bcm56846_config_load(const char *path);
+extern int bcm56846_soc_run(const char *script_path);
 
 
 static int attached;
@@ -31,10 +35,24 @@ void bcm56846_detach(int unit)
 
 int bcm56846_init(int unit, const char *config_path)
 {
+	char soc_path[512];
+	size_t dlen;
+
 	(void)unit;
-	(void)config_path;
 	if (!attached)
 		return -1;
-	/* TODO: load config.bcm, run rc.soc, rc.ports_0, rc.datapath_0 */
+	if (bcm56846_config_load(config_path) < 0)
+		return -1; /* config.bcm load failed */
+
+	/* Run rc.soc and rc.datapath_0 if present (base = config_path without trailing /) */
+	dlen = strlen(config_path);
+	if (dlen > 0 && config_path[dlen-1] == '/')
+		dlen--;
+	if (dlen > 0) {
+		snprintf(soc_path, sizeof(soc_path), "%.*s/rc.soc", (int)dlen, config_path);
+		bcm56846_soc_run(soc_path);
+		snprintf(soc_path, sizeof(soc_path), "%.*s/rc.datapath_0", (int)dlen, config_path);
+		bcm56846_soc_run(soc_path);
+	}
 	return 0;
 }
