@@ -122,9 +122,9 @@ Produces `initramfs/initramfs.cpio.gz`. Requires busybox (or set `BUSYBOX_STATIC
 
 Produces `boot/nos-powerpc.itb`.
 
-### 5. Rootfs (Debian 12 PPC32 squashfs)
+### 5. Rootfs (Debian 8 Jessie PPC32 squashfs)
 
-On an x86 host with `debootstrap`, `qemu-user-static`, `squashfs-tools`:
+Debian dropped 32-bit powerpc after Jessie, so the rootfs uses **jessie** from `archive.debian.org`. On an x86 Linux host with `debootstrap`, `qemu-user-static`, `squashfs-tools`:
 
 ```bash
 # Copy build artifacts into repo (bde/*.ko, build/sdk/libbcm56846.so, build/switchd/nos-switchd)
@@ -132,7 +132,7 @@ On an x86 host with `debootstrap`, `qemu-user-static`, `squashfs-tools`:
 ./rootfs/build.sh
 ```
 
-Produces `onie-installer/sysroot.squash.xz`. Set `BUILD_ARTIFACTS=0` to build rootfs without our binaries (for testing). Set `KERNEL_VERSION=5.10.0` to match the kernel you use.
+Produces `onie-installer/sysroot.squash.xz`. Set `BUILD_ARTIFACTS=0` to build rootfs without our binaries. Set `DEBIAN_SUITE=jessie` and `DEBIAN_MIRROR=http://archive.debian.org/debian` (defaults in rootfs/build.sh). If you run the **one-command** script (below) from a host without debootstrap (e.g. macOS), the script builds the rootfs on the build server in Docker and copies it back.
 
 ### 6. ONIE installer .bin
 
@@ -156,15 +156,28 @@ Or copy the `.bin` to a USB stick and run `onie-nos-install /mnt/usb/open-nos-as
 
 ## One-command ONIE image (Edgecore AS5610-52X)
 
-To produce a **single loadable .bin** with all partitions and info for the Edgecore AS5610 to boot:
+To produce a **single loadable .bin** (kernel + Debian rootfs + partition layout) for the Edgecore AS5610:
 
 ```bash
-# Requires: DTB (or Cumulus image to extract from), and build server access for kernel/SDK
-DTB_IMAGE=/path/to/as5610_52x.dtb ./scripts/build-onie-image.sh
-# or
-CUMULUS_BIN=/path/to/CumulusLinux-*.bin ./scripts/build-onie-image.sh
+# Full build: kernel+BDE+SDK+switchd on server, then rootfs (in Docker on server if needed), FIT, .bin
+./scripts/build-onie-image.sh
+
+# Or use existing artifacts (no server build): provide DTB and optionally skip rootfs
+BUILD_SERVER=0 DTB_IMAGE=/path/to/as5610_52x.dtb ./scripts/build-onie-image.sh
+# Extract DTB from Cumulus: CUMULUS_BIN=/path/to/CumulusLinux-*.bin ./scripts/build-onie-image.sh
 ```
 
-This script: builds kernel+BDE+SDK+switchd on server and copies back; builds initramfs and FIT; builds rootfs (debootstrap); packages **onie-installer/open-nos-as5610-YYYYMMDD.bin** with the correct partition layout and platform strings for Edgecore/Accton AS5610-52X.
+The script: (1) optionally builds kernel+BDE+SDK+switchd on build server and copies back; (2) resolves DTB (from `DTB_IMAGE`, `CUMULUS_BIN`, or minimal build); (3) builds initramfs and FIT (`mkimage -f auto`); (4) builds **Debian Jessie PPC32** rootfs (locally if debootstrap/qemu-user-static/squashfs-tools present, otherwise in Docker on build server); (5) packages **onie-installer/open-nos-as5610-YYYYMMDD.bin**. Set `SKIP_ROOTFS=1` for a kernel-only .bin.
 
-See **docs/EDGECORE_AS5610_ONIE_PARTITIONS.md** for the full partition table and boot flow.
+### Serving the image for ONIE install
+
+Place the `.bin` on a host reachable by the switch and serve it over HTTP. Example (Python one-liner on port 8000):
+
+```bash
+# On the server (e.g. 10.22.1.4)
+cd /home/smiley/http-server
+python3 -m http.server 8000 &
+# Install URL from switch (ONIE): onie-nos-install http://10.22.1.4:8000/open-nos-as5610-YYYYMMDD.bin
+```
+
+See **docs/EDGECORE_AS5610_ONIE_PARTITIONS.md** for the partition table and boot flow.

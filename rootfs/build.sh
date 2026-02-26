@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build Debian 12 (Bookworm) PPC32 rootfs and pack as squashfs for ONIE installer.
+# Build Debian PPC32 rootfs and pack as squashfs for ONIE installer.
+# PPC32 was dropped after Debian 8 (jessie), so we use jessie + archive.debian.org.
 # Run on x86 build host with: debootstrap, qemu-user-static, squashfs-tools.
 #
 # Usage:
@@ -17,6 +18,9 @@ OUT_DIR="${ROOTFS_OUT_DIR:-$REPO_ROOT/onie-installer}"
 OUT_FILE="${ROOTFS_OUT:-$OUT_DIR/sysroot.squash.xz}"
 KERNEL_VERSION="${KERNEL_VERSION:-5.10.0}"
 BUILD_ARTIFACTS="${BUILD_ARTIFACTS:-1}"
+# PPC32: last Debian with powerpc is jessie (Debian 8); use archive
+DEBIAN_SUITE="${DEBIAN_SUITE:-jessie}"
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://archive.debian.org/debian}"
 
 log() { echo "[rootfs/build] $1"; }
 
@@ -38,29 +42,30 @@ done
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
 
-# Stage 1: foreign debootstrap
-log "debootstrap (foreign) bookworm powerpc..."
-debootstrap --arch=powerpc --foreign bookworm "$STAGING" http://deb.debian.org/debian
+# Stage 1: foreign debootstrap (jessie is last Debian with powerpc)
+# archive.debian.org uses old release keys; skip GPG check for EOL
+log "debootstrap (foreign) $DEBIAN_SUITE powerpc..."
+debootstrap --arch=powerpc --foreign --no-check-gpg "$DEBIAN_SUITE" "$STAGING" "$DEBIAN_MIRROR"
 
 # Stage 2: second-stage inside chroot via QEMU
 cp "$QEMU_STATIC" "$STAGING/usr/bin/" 2>/dev/null || mkdir -p "$STAGING/usr/bin" && cp "$QEMU_STATIC" "$STAGING/usr/bin/"
 chroot "$STAGING" /debootstrap/debootstrap --second-stage
 
-# APT sources
+# APT sources (archive for jessie; no updates for EOL)
 log "Configuring APT..."
-cat > "$STAGING/etc/apt/sources.list" <<'EOF'
-deb http://deb.debian.org/debian bookworm main
-deb http://security.debian.org/debian-security bookworm-security main
-deb http://deb.debian.org/debian bookworm-updates main
+cat > "$STAGING/etc/apt/sources.list" <<EOF
+deb $DEBIAN_MIRROR $DEBIAN_SUITE main
 EOF
+# Allow deprecated repos for old release
+echo 'Acquire::Check-Valid-Until "false";' > "$STAGING/etc/apt/apt.conf.d/99no-check-valid-until"
 
-# Install packages (minimal set for NOS)
+# Install packages (minimal set for NOS; jessie package names)
 log "Installing packages..."
 chroot "$STAGING" apt-get update -qq
 chroot "$STAGING" env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
 	iproute2 openssh-server python3 ethtool tcpdump i2c-tools pciutils libpci3 \
-	ca-certificates systemd-sysv 2>/dev/null || true
-# Optional: frr, ifupdown2, lldpd (may not be in minimal bookworm)
+	ca-certificates 2>/dev/null || true
+# Optional: frr, ifupdown2, lldpd (may not be in jessie or have different names)
 chroot "$STAGING" env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
 	frr ifupdown2 lldpd 2>/dev/null || true
 

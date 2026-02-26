@@ -12,8 +12,10 @@
 | **Phase 1 — Boot + BDE** | ✅ Implemented | Kernel 5.10, BDE modules, S-Channel, validation test |
 | **Phase 2 — SDK** | 🟢 2a–2g + L2_USER_ENTRY | Config, SOC runner, S-Chan, L2 add/delete/get, L2_USER_ENTRY add/delete, L3/ECMP, VLAN, port+SerDes, pktio, stats. 40G + HW tests pending. |
 | **Phase 3 — nos-switchd** | 🟢 Core complete | Netlink→SDK for link/addr/route/neigh; link-state poll; TX/RX threads. Ready for HW/FRR test. |
-| **Phase 1a DTB/initramfs** | 🟢 Scripts in place | initramfs/build.sh, boot/build-fit.sh, nos.its (kernel+dtb+initramfs); DTB obtain from ONL/Cumulus |
-| **Hardware validation** | ⏳ Pending | Run `bde_validate` on AS5610 with BDE loaded |
+| **Phase 1a DTB/initramfs/FIT** | ✅ In place | initramfs/build.sh, boot/build-fit.sh (mkimage -f auto), DTB from ONL/Cumulus or minimal .dts |
+| **Rootfs** | ✅ Debian Jessie PPC32 | rootfs/build.sh — jessie from archive.debian.org (last Debian with powerpc); build locally or on server in Docker |
+| **ONIE installer .bin** | ✅ Produced | One-command: `./scripts/build-onie-image.sh` → `onie-installer/open-nos-as5610-YYYYMMDD.bin`; loadable via ONIE |
+| **Hardware validation** | ⏳ Pending | Run `bde_validate` and `onie-nos-install` on AS5610 |
 
 ---
 
@@ -33,7 +35,7 @@
 ## Plan Progress (from PLAN.md)
 
 ### Phase 1 — Boot + Kernel + Our BDE
-- **1a:** [x] Kernel 5.10 PPC32 built. [ ] DTB, [ ] initramfs packed, [ ] FIT, [ ] boot on target
+- **1a:** [x] Kernel 5.10 PPC32 built. [x] DTB (minimal .dts or from Cumulus/ONL). [x] initramfs packed. [x] FIT (nos-powerpc.itb). [ ] Boot on target via ONIE.
 - **1b:** [x] nos-kernel-bde.ko (PCI, BAR0, DMA, S-Channel, exports)
 - **1c:** [x] nos-user-bde.ko (/dev/nos-bde, ioctls, mmap)
 - **1d:** [x] BDE validation test (bde_validate). [ ] Run on target → Passed 3/3
@@ -47,8 +49,9 @@
 - [x] TUN, ports.conf, netlink (NEWLINK, NEWADDR/DELADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr+cache), link-state, TX/RX. [x] SDK complete (L2 get, stats, L2_USER_ENTRY, SerDes). [ ] HW validation.
 
 ### Phase 6 — ONIE installer
-- [x] install.sh (self-extracting), platform.conf, platform.fdisk, uboot_env, rootfs/build.sh, onie-installer/build.sh → .bin
-- [ ] Test on switch: onie-nos-install → boot our NOS
+- [x] install.sh (self-extracting), platform.conf, platform.fdisk, uboot_env, rootfs/build.sh (Debian jessie), onie-installer/build.sh → .bin
+- [x] One-command image: `./scripts/build-onie-image.sh` produces loadable .bin (kernel + jessie rootfs). Rootfs built locally or on server (Docker).
+- [ ] Test on switch: `onie-nos-install http://10.22.1.4:8000/open-nos-as5610-YYYYMMDD.bin` → boot our NOS
 
 ### Phase 4 — FRR
 - [x] FRR PPC32: rootfs apt install frr; from-source in docs/FRR-PPC32.md. [ ] BGP/OSPF config, ECMP/BFD tests on HW.

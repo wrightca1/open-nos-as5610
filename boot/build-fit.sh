@@ -28,15 +28,16 @@ if [ ! -f "$DTB_IMAGE" ]; then
 fi
 
 OUT="nos-powerpc.itb"
-# Copy inputs into CWD for mkimage -k . -d .
+# Copy inputs into CWD for mkimage -f auto
 if [ -f "$INITRAMFS_IMAGE" ]; then
-	cp -f "$INITRAMFS_IMAGE" initramfs.cpio.gz
+	cp -f "$INITRAMFS_IMAGE" initramfs.cpio.gz || true
 else
 	echo "Missing initramfs: $INITRAMFS_IMAGE (build first: initramfs/build.sh)"
 	exit 1
 fi
-cp -f "$KERNEL_IMAGE" uImage
-cp -f "$DTB_IMAGE" as5610_52x.dtb
-mkimage -f nos.its -k . -d . "$OUT"
+cp -f "$KERNEL_IMAGE" uImage || true
+cp -f "$DTB_IMAGE" as5610_52x.dtb || true
+# Use -f auto (no .its/dtc/incbin) for maximum compatibility across mkimage versions
+mkimage -f auto -A powerpc -O linux -T kernel -C none -a 0x1000000 -e 0x1000000 -d uImage -b as5610_52x.dtb -i initramfs.cpio.gz "$OUT"
 
 echo "Built: $SCRIPT_DIR/$OUT"

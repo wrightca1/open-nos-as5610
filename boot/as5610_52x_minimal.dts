@@ -1,0 +1,49 @@
+/*
+ * Minimal device tree for P2020/AS5610-52X so FIT can be built.
+ * Replace with ONL/Cumulus DTB for real boot. Compatible enough for kernel to accept.
+ */
+/dts-v1/;
+
+/ {
+	model = "accton,as5610-52x";
+	compatible = "accton,as5610-52x", "fsl,P2020RDB";
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		PowerPC,P2020@0 {
+			device_type = "cpu";
+			reg = <0x0>;
+		};
+		PowerPC,P2020@1 {
+			device_type = "cpu";
+			reg = <0x1>;
+		};
+	};
+
+	memory {
+		device_type = "memory";
+		reg = <0x0 0x0 0x0 0x10000000>;
+	};
+
+	chosen {
+		bootargs = "root=/dev/sda6 rw";
+		stdout-path = "/soc@fffe00000/serial@4500";
+	};
+
+	soc@fffe00000 {
+		compatible = "fsl,p2020-immr", "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0x0 0xf 0xffe00000 0x200000>;
+
+		serial@4500 {
+			device_type = "serial";
+			compatible = "ns16550";
+			reg = <0x4500 0x100>;
+			clock-frequency = <0>;
+		};
+	};
+};

@@ -94,7 +94,7 @@
 | Component | Source | License | Notes |
 |-----------|--------|---------|-------|
 | **Linux kernel** | upstream kernel.org | GPL-2.0 | PPC32 big-endian, cross-compiled; must support tun.ko, i2c, PCI |
-| **Debian 12 (Bookworm) PPC32** | debian.org | Various (all OSS) | Base rootfs — `debootstrap --arch powerpc`; provides dpkg/apt, libc, all userspace |
+| **Debian 8 (Jessie) PPC32** | archive.debian.org | Various (all OSS) | Base rootfs — `debootstrap --arch powerpc jessie` (last Debian with powerpc); provides dpkg/apt, libc, userspace |
 | **FRRouting (FRR)** | github.com/FRRouting/frr | GPL-2.0 / LGPL | BGP, OSPF, ISIS, static, BFD — installed as Debian package |
 | **iproute2** | kernel.org | GPL-2.0 | Debian package |
 | **ifupdown2** | github.com/CumulusNetworks/ifupdown2 | GPL-2.0 | Interface configuration — Debian package |
@@ -840,51 +840,32 @@ The `rw-overlay` partition (sda3) is shared between both slots. On a slot switch
 
 ## 11. Build System
 
-### 11.1 Rootfs: Debian 12 (Bookworm) PPC32
+### 11.1 Rootfs: Debian 8 (Jessie) PPC32
 
-The rootfs is a Debian 12 (Bookworm) system bootstrapped for `powerpc` (PPC32 big-endian).
-Debian maintains a full PPC32 archive with all the packages we need.
+The rootfs is a Debian system bootstrapped for `powerpc` (PPC32 big-endian). **Debian dropped 32-bit powerpc after Jessie**, so we use **Debian 8 (jessie)** from `archive.debian.org`.
 
-**Bootstrap flow** (runs on x86 build host):
+**Bootstrap flow** (runs on x86 build host or in Docker on build server):
 
 ```bash
-# Stage 1: foreign debootstrap on x86
-debootstrap --arch=powerpc --foreign bookworm /mnt/rootfs \
-    http://deb.debian.org/debian
+# Stage 1: foreign debootstrap (--no-check-gpg for EOL archive)
+debootstrap --arch=powerpc --foreign --no-check-gpg jessie /mnt/rootfs \
+    http://archive.debian.org/debian
 
 # Stage 2: complete inside QEMU user-mode emulation
 cp /usr/bin/qemu-ppc-static /mnt/rootfs/usr/bin/
 chroot /mnt/rootfs /debootstrap/debootstrap --second-stage
 
-# Stage 3: install NOS packages
-chroot /mnt/rootfs apt-get install -y \
-    frr \
-    iproute2 \
-    ifupdown2 \
-    lldpd \
-    openssh-server \
-    python3 \
-    ethtool \
-    tcpdump \
-    i2c-tools \
-    libpci-dev
-
-# Stage 4: install our own .deb packages
-dpkg --root=/mnt/rootfs -i \
-    nos-switchd_*.deb \
-    libbcm56846_*.deb \
-    platform-mgrd_*.deb
-
-# Stage 5: pack to squashfs
+# Stage 3: APT sources (archive; set Acquire::Check-Valid-Until "false" for EOL)
+# Stage 4: apt-get install iproute2 openssh-server python3 ethtool tcpdump i2c-tools pciutils frr ifupdown2 lldpd
+# Stage 5: copy our artifacts (libbcm56846.so, nos-switchd, BDE .ko), overlay, pack squashfs
 mksquashfs /mnt/rootfs sysroot.squash.xz -comp xz
 ```
 
-**Why Debian 12:**
-- Full PPC32 package archive — FRR, iproute2, lldpd, openssh all install with `apt`
-- `dpkg` means our own code (SDK, switchd) ships as versioned `.deb` packages
-- Security updates via `apt upgrade` — no rebuild required for CVE fixes
-- Same approach as Cumulus (Debian 7) and ONL (Debian 8), but on a supported release
-- `debootstrap` + QEMU user-mode is the standard cross-bootstrap method for PPC32
+**Why Debian Jessie:**
+- Last Debian release with official powerpc (32-bit) — Bookworm and later have no powerpc port
+- Full PPC32 package archive on archive.debian.org — FRR, iproute2, lldpd, openssh install with `apt`
+- Same approach as Cumulus (Debian 7) and ONL (Debian 8)
+- `debootstrap` + QEMU user-mode is the standard cross-bootstrap; rootfs can be built locally (Linux) or on build server in Docker via `scripts/build-onie-image.sh`
 
 ### 11.2 Toolchain
 

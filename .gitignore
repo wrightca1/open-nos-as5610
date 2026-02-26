@@ -6,9 +6,12 @@ bde/*.mod.c
 bde/.*.cmd
 bde/.tmp_versions/
 onie-installer/open-nos-as5610-*.bin
+onie-installer/sysroot.squash.xz
 onie-installer/data.tar
 onie-installer/.data.*
 rootfs/staging/
+boot/nos-auto.itb
+boot/nos-minimal.its
 initramfs/root/
 initramfs/initramfs.cpio.gz
 boot/uImage
