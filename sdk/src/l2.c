@@ -1,16 +1,20 @@
 /*
  * L2 table — L2_ENTRY (hash, 131072 entries, 13 bytes = 4 words).
- * Pack entry from bcm56846_l2_addr_t; hash key from MAC+VLAN; write via S-Chan (stub).
- * RE: L2_ENTRY_FORMAT.md, L2_WRITE_PATH_COMPLETE.md
+ * Pack entry from bcm56846_l2_addr_t; hash key from MAC+VLAN; write via S-Channel WRITE_MEMORY.
+ * RE: L2_ENTRY_FORMAT.md, SWITCHD_L3_ROUTE_PROGRAMMING_ANALYSIS.md
  */
 #include "bcm56846.h"
 #include "bcm56846_regs.h"
 #include <errno.h>
 #include <string.h>
 
+#define L2_ENTRY_BASE     0x07120000
 #define L2_ENTRY_ENTRIES  131072
 #define L2_ENTRY_WORDS    4
+#define L2_ENTRY_STRIDE   16   /* 13-byte entry, 16-byte aligned */
 #define KEY_TYPE_L2       0
+
+extern int schan_write_memory(int unit, uint32_t addr, const uint32_t *data, int num_words);
 
 /* Hash key: (MAC<<16)|(VLAN<<4)|(KEY_TYPE<<1)|0. VALID=0 in key. */
 static uint64_t l2_hash_key(const uint8_t mac[6], uint16_t vid)
@@ -45,18 +49,14 @@ static void l2_pack_entry(const bcm56846_l2_addr_t *addr, uint32_t *words)
 	words[3] = 0;
 }
 
-/* Write L2_ENTRY at index. Stub: S-Chan memory-write format TBD (WRITE_MECHANISM_ANALYSIS). */
+/* Write L2_ENTRY at index via S-Channel WRITE_MEMORY (opcode 0x28, addr = base + index*stride). */
 static int l2_table_write(int unit, int index, const uint32_t *words)
 {
-	(void)unit;
-	(void)index;
-	(void)words;
-	/* TODO: S-Channel memory write to L2_ENTRY base 0x07120000 + index*16 (or index*13 rounded).
-	 * Command format from WRITE_MECHANISM_ANALYSIS / SCHAN_FORMAT_ANALYSIS. For now no-op so control path runs. */
-	return 0;
+	uint32_t addr = L2_ENTRY_BASE + (uint32_t)index * L2_ENTRY_STRIDE;
+	return schan_write_memory(unit, addr, words, L2_ENTRY_WORDS);
 }
 
-/* Delete: write VALID=0 at index. We need to find index from mac+vid (hash + probe). */
+/* Delete: write all-zero (VALID=0) at index. */
 static int l2_table_delete_at(int unit, int index)
 {
 	uint32_t words[L2_ENTRY_WORDS] = { 0, 0, 0, 0 };

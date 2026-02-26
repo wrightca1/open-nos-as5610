@@ -90,7 +90,7 @@ int main(int argc, char **argv)
 		rx_cookie.tun_fds = tun_fds;
 		rx_cookie.num_ports = num_ports;
 		if (rx_start(unit, tun_fds, num_ports, &rx_cookie) < 0)
-			fprintf(stderr, "rx_start failed (stub)\n");
+			fprintf(stderr, "rx_start failed\n");
 	}
 
 	/* Threads: netlink, link-state poll, TX */

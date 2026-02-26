@@ -16,6 +16,43 @@ cd "$REPO_ROOT"
 log() { echo "[$(date +'%H:%M:%S')] $1"; }
 warn() { echo "[WARN] $1"; }
 
+# If toolchain install fails on old distros (e.g. Debian 8),
+# fall back to a modern Docker container build.
+IN_DOCKER="${IN_DOCKER:-0}"
+DOCKER_IMAGE="${DOCKER_IMAGE:-debian:bookworm}"
+
+docker_fallback_build() {
+    if [ "$IN_DOCKER" = "1" ]; then
+        return 1
+    fi
+    if ! command -v docker &>/dev/null; then
+        return 1
+    fi
+
+    log "Falling back to Docker build ($DOCKER_IMAGE)..."
+    # Re-run this script inside container with a modern apt.
+    docker run --rm \
+        -e BUILD_KERNEL="${BUILD_KERNEL:-0}" \
+        -e KERNEL_SRC="${KERNEL_SRC:-}" \
+        -e IN_DOCKER=1 \
+        -e DEBIAN_FRONTEND=noninteractive \
+        -v "$REPO_ROOT:/work" \
+        -w /work \
+        "$DOCKER_IMAGE" \
+        bash -lc "
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            ca-certificates git make cmake \
+            gcc g++ \
+            gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
+            bc libssl-dev libelf-dev flex bison \
+            pkg-config file
+          ./scripts/remote-build.sh
+        "
+    exit $?
+}
+
 # --- Toolchain ---
 log "Checking PPC32 cross-toolchain..."
 if ! command -v powerpc-linux-gnu-gcc &>/dev/null; then
@@ -24,7 +61,9 @@ if ! command -v powerpc-linux-gnu-gcc &>/dev/null; then
     sudo apt-get update -qq
     sudo apt-get install -y -qq gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
         make bc libssl-dev libelf-dev flex bison || {
-        warn "apt install failed (e.g. on Debian 8). Install manually: apt-get install gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu"
+        warn "apt install failed (e.g. on Debian 8). Trying Docker fallback..."
+        docker_fallback_build
+        warn "Docker fallback unavailable; install manually: apt-get install gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu"
         exit 1
     }
 fi
