@@ -131,9 +131,9 @@ ls -la /dev/nos-bde   # should exist, owned by switchd user
 
 ## RE References
 
-- `../edgecore-5610-re/ASIC_INIT_AND_DMA_MAP.md` — BAR0 layout, DMA pool, register R/W
-- `../edgecore-5610-re/BDE_CMIC_REGISTERS.md` — CMIC register offsets
-- `../edgecore-5610-re/WRITE_MECHANISM_ANALYSIS.md` — S-Channel DMA path (GDB confirmed)
-- `../edgecore-5610-re/SCHAN_FORMAT_ANALYSIS.md` — S-Channel command word format
-- `../edgecore-5610-re/SCHAN_AND_RING_BUFFERS.md` — DMA ring registers
-- `../edgecore-5610-re/DMA_DCB_LAYOUT_FROM_KNET.md` — DCB descriptor format
+- `../../docs/reverse-engineering/ASIC_INIT_AND_DMA_MAP.md` — BAR0 layout, DMA pool, register R/W
+- `../../docs/reverse-engineering/BDE_CMIC_REGISTERS.md` — CMIC register offsets
+- `../../docs/reverse-engineering/WRITE_MECHANISM_ANALYSIS.md` — S-Channel DMA path (GDB confirmed)
+- `../../docs/reverse-engineering/SCHAN_FORMAT_ANALYSIS.md` — S-Channel command word format
+- `../../docs/reverse-engineering/SCHAN_AND_RING_BUFFERS.md` — DMA ring registers
+- `../../docs/reverse-engineering/DMA_DCB_LAYOUT_FROM_KNET.md` — DCB descriptor format

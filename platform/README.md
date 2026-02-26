@@ -33,5 +33,5 @@ The `accton_as5610_52x_cpld` driver is required. It is available in:
 
 ## RE References
 
-- `../edgecore-5610-re/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`
-- `../edgecore-5610-re/SFP_TURNUP_AND_ACCESS.md`
+- `../../docs/reverse-engineering/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`
+- `../../docs/reverse-engineering/SFP_TURNUP_AND_ACCESS.md`

@@ -79,9 +79,9 @@ sdk/
 
 ## RE References (build order)
 
-1. S-Channel: `../edgecore-5610-re/SCHAN_FORMAT_ANALYSIS.md`, `WRITE_MECHANISM_ANALYSIS.md`
-2. Init:      `../edgecore-5610-re/initialization-sequence.md`, `SDK_AND_ASIC_CONFIG_FROM_SWITCH.md`
-3. Port:      `../edgecore-5610-re/PORT_BRINGUP_REGISTER_MAP.md`, `SERDES_WC_INIT.md`
-4. L2:        `../edgecore-5610-re/L2_ENTRY_FORMAT.md`, `L2_WRITE_PATH_COMPLETE.md`
-5. L3:        `../edgecore-5610-re/L3_NEXTHOP_FORMAT.md`, `L3_ECMP_VLAN_WRITE_PATH.md`
-6. Pkt I/O:   `../edgecore-5610-re/PACKET_BUFFER_ANALYSIS.md`, `DMA_DCB_LAYOUT_FROM_KNET.md`
+1. S-Channel: `../../docs/reverse-engineering/SCHAN_FORMAT_ANALYSIS.md`, `WRITE_MECHANISM_ANALYSIS.md`
+2. Init:      `../../docs/reverse-engineering/initialization-sequence.md`, `SDK_AND_ASIC_CONFIG_FROM_SWITCH.md`
+3. Port:      `../../docs/reverse-engineering/PORT_BRINGUP_REGISTER_MAP.md`, `SERDES_WC_INIT.md`
+4. L2:        `../../docs/reverse-engineering/L2_ENTRY_FORMAT.md`, `L2_WRITE_PATH_COMPLETE.md`
+5. L3:        `../../docs/reverse-engineering/L3_NEXTHOP_FORMAT.md`, `L3_ECMP_VLAN_WRITE_PATH.md`
+6. Pkt I/O:   `../../docs/reverse-engineering/PACKET_BUFFER_ANALYSIS.md`, `DMA_DCB_LAYOUT_FROM_KNET.md`

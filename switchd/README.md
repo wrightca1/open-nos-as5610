@@ -100,10 +100,10 @@ nos-switchd
 
 ## RE References
 
-- `../edgecore-5610-re/PACKET_IO_VERIFIED.md` — TUN mechanism confirmed
-- `../edgecore-5610-re/netlink-handlers.md` — handler logic
-- `../edgecore-5610-re/netlink-message-flow.md` — message flow
-- `../edgecore-5610-re/api-patterns.md` — bcm_* → opennsl_* mapping (our API is similar)
-- `../edgecore-5610-re/COMPLETE_INTERFACE_ANALYSIS.md` — TUN fd layout
-- `../edgecore-5610-re/QSFP_BREAKOUT_CONFIGURATION.md` — breakout port numbering
-- `../edgecore-5610-re/SDK_AND_ASIC_CONFIG_FROM_SWITCH.md` — portmap entries, rc.datapath_0
+- `../../docs/reverse-engineering/PACKET_IO_VERIFIED.md` — TUN mechanism confirmed
+- `../../docs/reverse-engineering/netlink-handlers.md` — handler logic
+- `../../docs/reverse-engineering/netlink-message-flow.md` — message flow
+- `../../docs/reverse-engineering/api-patterns.md` — bcm_* → opennsl_* mapping (our API is similar)
+- `../../docs/reverse-engineering/COMPLETE_INTERFACE_ANALYSIS.md` — TUN fd layout
+- `../../docs/reverse-engineering/QSFP_BREAKOUT_CONFIGURATION.md` — breakout port numbering
+- `../../docs/reverse-engineering/SDK_AND_ASIC_CONFIG_FROM_SWITCH.md` — portmap entries, rc.datapath_0

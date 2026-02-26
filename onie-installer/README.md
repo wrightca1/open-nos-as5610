@@ -49,4 +49,4 @@ U-Boot (PowerPC P2020)
 
 ## RE References
 
-- `../edgecore-5610-re/ONIE_BOOT_AND_PARTITION_LAYOUT.md` — complete installer format
+- `../../docs/reverse-engineering/ONIE_BOOT_AND_PARTITION_LAYOUT.md` — complete installer format

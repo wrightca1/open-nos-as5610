@@ -189,7 +189,7 @@ Note: components pulled in as Debian packages (Linux, FRR, iproute2, etc.) carry
 
 ## Contributing
 
-The reverse engineering data is published at **[wrightca1/edgecore-5610-reverse-engineering](https://github.com/wrightca1/edgecore-5610-reverse-engineering)** — all register layouts, table formats, initialization sequences, and captured traces are there.
+The reverse engineering data lives in **`docs/reverse-engineering/`** in this repository — register layouts, table formats, initialization sequences, and captured traces. It may also be published at [wrightca1/edgecore-5610-reverse-engineering](https://github.com/wrightca1/edgecore-5610-reverse-engineering).
 
 If you have an AS5610-52X and want to contribute implementation work, open an issue or pull request against this repo.
 
