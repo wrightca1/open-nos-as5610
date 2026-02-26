@@ -324,11 +324,11 @@ Key data: `../docs/reverse-engineering/PORT_BRINGUP_REGISTER_MAP.md`, `../docs/r
 XLPORT formula: `block_base + 0x80000 + port_offset`; SerDes MDIO pages: 0x0008, 0x0a00, 0x1000, 0x3800
 
 #### 2d — L2 Table
-- [ ] Implement `bcm56846_l2_addr_add(unit, l2_addr)`: pack L2_ENTRY bitfields, issue S-Channel WRITE
-- [ ] Implement `bcm56846_l2_addr_delete(unit, mac, vid)`: compute hash key, issue S-Channel DELETE
+- [x] Implement `bcm56846_l2_addr_add(unit, l2_addr)`: pack L2_ENTRY 4 words (VALID, KEY_TYPE, VLAN, MAC, PORT, MODULE, STATIC), hash key `(MAC<<16)|(VLAN<<4)|KEY_TYPE`, linear probe 0..5; table write stub (S-Chan format TBD)
+- [x] Implement `bcm56846_l2_addr_delete(unit, mac, vid)`: hash key, probe, write VALID=0 at slot (stub)
 - [ ] Implement `bcm56846_l2_addr_get(unit, mac, vid, l2_addr)`: hash lookup + S-Channel READ
 - [ ] Implement L2_USER_ENTRY writes for guaranteed/BPDU entries
-- [ ] Test: add a static MAC, verify it appears in `bcmcmd listmem l2_entry` (or equivalent)
+- [ ] Test: add a static MAC, verify in hardware (after S-Chan write path)
 
 Key data: `../docs/reverse-engineering/L2_ENTRY_FORMAT.md`, `../docs/reverse-engineering/L2_WRITE_PATH_COMPLETE.md`
 L2_ENTRY: 131072 entries × 13 bytes, base `0x07120000`; KEY = `(MAC<<16)|(VLAN<<4)|(KEY_TYPE<<1)`

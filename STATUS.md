@@ -10,7 +10,7 @@
 |------|--------|-------|
 | **Build system** | ✅ Working | Build server (Debian, PPC32 cross), kernel + BDE + SDK + switchd + tests |
 | **Phase 1 — Boot + BDE** | ✅ Implemented | Kernel 5.10, BDE modules, S-Channel, validation test |
-| **Phase 2 — SDK** | 🟡 Skeleton + 2a + 2b (partial) | attach/schan/reg; config.bcm loader; SOC runner (setreg/getreg); port/L2/L3/pktio/VLAN stubs |
+| **Phase 2 — SDK** | 🟡 Skeleton + 2a + 2b + 2d (partial) | config loader, SOC runner; L2 pack+hash+add/delete (table write stub); L3/intf stubs |
 | **Phase 3 — nos-switchd** | 🟡 In progress | Netlink: NEWLINK/NEWADDR/DELADDR (l3_intf), NEWROUTE/DELROUTE (l3_egress+route), NEWNEIGH/DELNEIGH (l2_addr + neighbor cache). Link-state, TX/RX. SDK stubs for L2/L3/intf |
 | **Phase 1a DTB/initramfs** | 📋 Scaffolding | initramfs/ and boot/nos.its; DTB still to obtain/build |
 | **Hardware validation** | ⏳ Pending | Run `bde_validate` on AS5610 with BDE loaded |
