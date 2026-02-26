@@ -257,12 +257,8 @@ Without eth0, the switch has no management access after install (no console on m
 #### 1a — Kernel + DTB + initramfs + Basic Boot
 - [x] Build Linux 5.10 LTS kernel for PPC32 e500v2 target with required `CONFIG_*` options
 - [ ] **Device Tree Blob (DTB)**: Obtain or build the P2020-based DTB for the AS5610-52X. The FIT image (`uImage-powerpc.itb`) must bundle `kernel + dtb + initramfs` using `mkimage -f`. Without a correct DTB, Linux cannot enumerate the P2020 SoC peripherals (eTSEC eth0, I2C buses, CPLD local bus, PCIe). Reference: ONL tree has `as5610_52x.dts`; alternatively extract from Cumulus FIT image with `dumpimage -l`.
-- [ ] **initramfs**: Build a minimal initramfs that mounts the squashfs rootfs and overlayfs before `pivot_root`. Without this the switch cannot boot from the A/B squashfs layout. Contents: `busybox`, mount helpers, `pivot_root`. The initramfs is embedded in the FIT image. Steps:
-  - Assemble initramfs tree: `busybox sh`, `mount`, `switch_root`
-  - Mount squashfs: `mount -t squashfs /dev/sda6 /newroot -o ro`
-  - Mount overlayfs: `mount -t overlay overlay -o lowerdir=/newroot,upperdir=/dev/sda3/upper,workdir=/dev/sda3/work /newroot`
-  - `exec switch_root /newroot /sbin/init`
-- [ ] Pack FIT image: `mkimage -f nos.its nos-powerpc.itb` (`.its` references kernel, dtb, initramfs by path)
+- [x] **initramfs**: Build a minimal initramfs that mounts the squashfs rootfs and overlayfs before `pivot_root`. (`initramfs/build.sh` + `init` script; busybox, mount, switch_root; mount sda6 squashfs + sda3 overlay → switch_root)
+- [x] Pack FIT image: `boot/build-fit.sh` → `nos-powerpc.itb` (nos.its references kernel, dtb, initramfs)
 - [ ] Boot via ONIE (temporary minimal installer) or test netboot
 - [ ] Confirm PCI device visible: `lspci | grep 14e4:b846`
 - [ ] Load `tun.ko`, create a test TUN device, confirm kernel networking works
@@ -401,13 +397,13 @@ Key data: `../docs/reverse-engineering/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`
 
 ### Phase 6 — ONIE Installer
 
-- [ ] Write `install.sh`: self-extracting shell script, detect platform, partition, install kernel+rootfs
-- [ ] Write `platform.conf` for accton_as5610_52x (partition layout from RE docs)
-- [ ] Write `platform.fdisk` (MBR layout: sda1 persist, sda5/6 slot A, sda7/8 slot B, sda3 rw-overlay)
-- [ ] Write `uboot_env` fragments: `cl.active=1`, `bootsource=flashboot`
-- [ ] Build rootfs: Buildroot-based PPC32 rootfs with all packages
-- [ ] Package: `data.tar` with FIT kernel image + squashfs rootfs
-- [ ] Test: factory-fresh switch → `onie-nos-install http://.../open-nos.bin` → switch boots our NOS
+- [x] Write `install.sh`: self-extracting shell script, detect platform, partition, install kernel+rootfs (onie-installer/install.sh)
+- [x] Write `platform.conf` for accton_as5610_52x (cumulus/init/accton_as5610_52x/platform.conf)
+- [x] Write `platform.fdisk` (MBR layout: sda1 persist, sda5/6 slot A, sda7/8 slot B, sda3 rw-overlay)
+- [x] Write `uboot_env` fragments: `cl.active=1`, `bootsource=flashboot` (uboot_env/*.inc)
+- [x] Build rootfs: Debian 12 PPC32 rootfs (rootfs/build.sh: debootstrap + our artifacts + squashfs)
+- [x] Package: `onie-installer/build.sh` → `open-nos-as5610-YYYYMMDD.bin` (data.tar with FIT + squashfs)
+- [ ] Test: factory-fresh switch → `onie-nos-install http://.../open-nos-as5610-YYYYMMDD.bin` → switch boots our NOS
 
 Key data: `../docs/reverse-engineering/ONIE_BOOT_AND_PARTITION_LAYOUT.md`
 Storage: internal USB at `/sys/bus/usb/devices/1-1.3:1.0`; partition: sda5=kernel-A, sda6=rootfs-A, sda7=kernel-B, sda8=rootfs-B

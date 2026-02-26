@@ -1,0 +1,12 @@
+[Unit]
+Description=Load NOS BDE kernel modules
+Before=nos-switchd.service
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/insmod /lib/modules/%v/nos_kernel_bde.ko
+ExecStart=/sbin/insmod /lib/modules/%v/nos_user_bde.ko
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=open-nos-as5610 switch daemon
+After=nos-bde-modules.service network-pre.target
+Wants=nos-bde-modules.service
+
+[Service]
+ExecStart=/usr/sbin/nos-switchd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

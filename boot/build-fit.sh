@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build FIT image (nos-powerpc.itb) for AS5610-52X.
-# Requires: mkimage (u-boot-tools), kernel uImage, DTB, optional initramfs.
+# Requires: mkimage (u-boot-tools), kernel uImage, DTB, initramfs (initramfs/build.sh).
 #
 # Usage:
 #   ./build-fit.sh [kernel_uImage] [dtb] [initramfs.cpio.gz]
@@ -28,18 +28,15 @@ if [ ! -f "$DTB_IMAGE" ]; then
 fi
 
 OUT="nos-powerpc.itb"
-# Build FIT with mkimage; its file must have paths relative to CWD or absolute
-cp -f "$KERNEL_IMAGE" uImage 2>/dev/null || true
-cp -f "$DTB_IMAGE" as5610_52x.dtb 2>/dev/null || true
-
+# Copy inputs into CWD for mkimage -k . -d .
 if [ -f "$INITRAMFS_IMAGE" ]; then
-	cp -f "$INITRAMFS_IMAGE" initramfs.cpio.gz 2>/dev/null || true
-	mkimage -f nos.its -k . -d . "$OUT" 2>/dev/null || {
-		# If its doesn't include initramfs, build without
-		mkimage -f nos.its "$OUT"
-	}
+	cp -f "$INITRAMFS_IMAGE" initramfs.cpio.gz
 else
-	mkimage -f nos.its "$OUT"
+	echo "Missing initramfs: $INITRAMFS_IMAGE (build first: initramfs/build.sh)"
+	exit 1
 fi
+cp -f "$KERNEL_IMAGE" uImage
+cp -f "$DTB_IMAGE" as5610_52x.dtb
+mkimage -f nos.its -k . -d . "$OUT"
 
 echo "Built: $SCRIPT_DIR/$OUT"

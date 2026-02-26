@@ -1,0 +1,1 @@
+cl.platform accton_as5610_52x

@@ -12,7 +12,7 @@
 | **Phase 1 — Boot + BDE** | ✅ Implemented | Kernel 5.10, BDE modules, S-Channel, validation test |
 | **Phase 2 — SDK** | 🟢 2a–2g implemented | Config, SOC runner, S-Chan, L2 add/delete, L3 intf/egress/route/ECMP, VLAN, port enable/link, pktio TX/RX. L2 get + stats + HW test pending. |
 | **Phase 3 — nos-switchd** | 🟢 Core complete | Netlink→SDK for link/addr/route/neigh; link-state poll; TX/RX threads. Ready for HW/FRR test. |
-| **Phase 1a DTB/initramfs** | 📋 Scaffolding | initramfs/ and boot/nos.its; DTB still to obtain/build |
+| **Phase 1a DTB/initramfs** | 🟢 Scripts in place | initramfs/build.sh, boot/build-fit.sh, nos.its (kernel+dtb+initramfs); DTB obtain from ONL/Cumulus |
 | **Hardware validation** | ⏳ Pending | Run `bde_validate` on AS5610 with BDE loaded |
 
 ---
@@ -46,8 +46,12 @@
 ### Phase 3 — nos-switchd
 - [x] TUN, ports.conf, netlink (NEWLINK, NEWADDR/DELADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr+cache), link-state, TX/RX. [x] SDK L2/L3/intf/ECMP/VLAN/port/pktio (Phase 2c–2g). [ ] L2 get, stats, HW validation.
 
+### Phase 6 — ONIE installer
+- [x] install.sh (self-extracting), platform.conf, platform.fdisk, uboot_env, rootfs/build.sh, onie-installer/build.sh → .bin
+- [ ] Test on switch: onie-nos-install → boot our NOS
+
 ### Later
-- Phase 4 (FRR integration), Phase 5 (platform), Phase 6 (ONIE installer)
+- Phase 4 (FRR integration), Phase 5 (platform)
 
 ---
 
@@ -68,9 +72,9 @@ open-nos-as5610/
 ├── etc/nos/            # config.bcm (sample portmap for 52 ports)
 ├── initramfs/          # init script, build.sh (scaffolding)
 ├── boot/               # nos.its FIT template, README (DTB instructions)
-├── rootfs/             # README only
+├── rootfs/             # build.sh (debootstrap PPC32 + squashfs), overlay/ (fstab, systemd units)
 ├── platform/           # README only
-└── onie-installer/     # README only
+└── onie-installer/     # install.sh, build.sh, platform.conf, platform.fdisk, uboot_env/ → .bin
 ```
 
 ---

@@ -81,3 +81,73 @@ cmake --build build --target package
 ```
 
 See [PLAN.md](PLAN.md) Phase 0 and Phase 1 for full build and boot sequence.
+
+---
+
+## Building the ONIE-installable image
+
+To produce an image that can be installed via ONIE on the switch (`onie-nos-install http://.../open-nos-as5610-YYYYMMDD.bin`), build in order:
+
+### 1. Kernel + BDE + SDK + switchd (build server)
+
+```bash
+./scripts/build-on-build-server.sh
+```
+
+Copy back from server: `uImage`, BDE `.ko`, `libbcm56846.so`, `nos-switchd` (see "After the build" above). Optionally copy `linux-5.10/arch/powerpc/boot/uImage` and any built modules.
+
+### 2. DTB (Device Tree Blob)
+
+Required for FIT and boot. Obtain once:
+
+- **From ONL**: Build from ONL tree `as5610_52x.dts` → `as5610_52x.dtb`
+- **From Cumulus**: `dumpimage -l /path/to/CumulusLinux-*.bin` then `dumpimage -i ... -p <fdt_index> -o as5610_52x.dtb`
+
+Place `as5610_52x.dtb` in `boot/` or set `DTB_IMAGE` when building FIT.
+
+### 3. Initramfs
+
+```bash
+./initramfs/build.sh
+```
+
+Produces `initramfs/initramfs.cpio.gz`. Requires busybox (or set `BUSYBOX_STATIC` to a PPC32 static busybox path).
+
+### 4. FIT image (kernel + DTB + initramfs)
+
+```bash
+# From repo root; kernel uImage and DTB in boot/ or set KERNEL_IMAGE, DTB_IMAGE
+./boot/build-fit.sh [path/to/uImage] [path/to/as5610_52x.dtb] [path/to/initramfs.cpio.gz]
+```
+
+Produces `boot/nos-powerpc.itb`.
+
+### 5. Rootfs (Debian 12 PPC32 squashfs)
+
+On an x86 host with `debootstrap`, `qemu-user-static`, `squashfs-tools`:
+
+```bash
+# Copy build artifacts into repo (bde/*.ko, build/sdk/libbcm56846.so, build/switchd/nos-switchd)
+# or set BUILD_DIR to build server path if staging is on NFS.
+./rootfs/build.sh
+```
+
+Produces `onie-installer/sysroot.squash.xz`. Set `BUILD_ARTIFACTS=0` to build rootfs without our binaries (for testing). Set `KERNEL_VERSION=5.10.0` to match the kernel you use.
+
+### 6. ONIE installer .bin
+
+```bash
+./onie-installer/build.sh
+```
+
+Expects `boot/nos-powerpc.itb` (or `KERNEL_FIT`) and `onie-installer/sysroot.squash.xz` (or `ROOTFS_SQUASH`). Produces `onie-installer/open-nos-as5610-YYYYMMDD.bin`.
+
+### 7. Install on switch
+
+From ONIE (install or rescue mode):
+
+```bash
+onie-nos-install http://<your-server>/open-nos-as5610-YYYYMMDD.bin
+```
+
+Or copy the `.bin` to a USB stick and run `onie-nos-install /mnt/usb/open-nos-as5610-YYYYMMDD.bin`.

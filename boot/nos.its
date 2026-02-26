@@ -26,7 +26,6 @@
 			arch = "powerpc";
 			compression = "none";
 		};
-		/* Uncomment when initramfs is built:
 		initramfs {
 			description = "initramfs";
 			data = /incbin/("initramfs.cpio.gz");
@@ -35,7 +34,6 @@
 			os = "linux";
 			compression = "gzip";
 		};
-		*/
 	};
 
 	configurations {
@@ -44,7 +42,7 @@
 			description = "AS5610-52X boot";
 			kernel = "kernel";
 			fdt = "fdt";
-			/* ramdisk = "initramfs"; */
+			ramdisk = "initramfs";
 		};
 	};
 };
