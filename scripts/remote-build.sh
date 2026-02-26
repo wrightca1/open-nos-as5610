@@ -47,7 +47,7 @@ docker_fallback_build() {
             gcc g++ \
             gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
             bc libssl-dev libelf-dev flex bison \
-            pkg-config file
+            pkg-config file u-boot-tools
           ./scripts/remote-build.sh
         "
     exit $?
