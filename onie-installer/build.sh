@@ -27,9 +27,10 @@ trap "rm -rf '$DATA_DIR'" EXIT
 mkdir -p "$DATA_DIR"
 
 # control file (metadata for NOS)
+# ONIE matches platform from onie-sysinfo -p (e.g. accton_as5610_52x or edgecore_as5610_52x)
 cat > "$DATA_DIR/control" <<EOF
 Architecture: powerpc
-Platforms: accton_as5610_52x
+Platforms: accton_as5610_52x edgecore_as5610_52x
 OS-Release: open-nos-as5610
 Installer-Version: 1.0
 EOF

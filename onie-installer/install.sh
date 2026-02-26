@@ -51,8 +51,12 @@ elif [ -f /etc/onielabel ]; then
 	PLATFORM=$(grep -o 'accton_as5610[^ ]*' /etc/onielabel 2>/dev/null | head -1) || true
 fi
 PLATFORM="${PLATFORM:-accton_as5610_52x}"
-# Normalize to accton_as5610_52x
-case "$PLATFORM" in *as5610*52*) PLATFORM="accton_as5610_52x";; esac
+# Normalize: Edgecore AS5610-52X and Accton AS5610-52X use same partition layout
+case "$PLATFORM" in
+	*edgecore*as5610*52*|*edgecore*5610*52*) PLATFORM="accton_as5610_52x";;
+	*accton*as5610*52*) PLATFORM="accton_as5610_52x";;
+	*as5610*52*) PLATFORM="accton_as5610_52x";;
+esac
 
 # Block device (USB flash on AS5610)
 BLK_DEV="sda"

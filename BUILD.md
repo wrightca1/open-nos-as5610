@@ -151,3 +151,20 @@ onie-nos-install http://<your-server>/open-nos-as5610-YYYYMMDD.bin
 ```
 
 Or copy the `.bin` to a USB stick and run `onie-nos-install /mnt/usb/open-nos-as5610-YYYYMMDD.bin`.
+
+---
+
+## One-command ONIE image (Edgecore AS5610-52X)
+
+To produce a **single loadable .bin** with all partitions and info for the Edgecore AS5610 to boot:
+
+```bash
+# Requires: DTB (or Cumulus image to extract from), and build server access for kernel/SDK
+DTB_IMAGE=/path/to/as5610_52x.dtb ./scripts/build-onie-image.sh
+# or
+CUMULUS_BIN=/path/to/CumulusLinux-*.bin ./scripts/build-onie-image.sh
+```
+
+This script: builds kernel+BDE+SDK+switchd on server and copies back; builds initramfs and FIT; builds rootfs (debootstrap); packages **onie-installer/open-nos-as5610-YYYYMMDD.bin** with the correct partition layout and platform strings for Edgecore/Accton AS5610-52X.
+
+See **docs/EDGECORE_AS5610_ONIE_PARTITIONS.md** for the full partition table and boot flow.
