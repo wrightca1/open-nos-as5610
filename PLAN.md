@@ -314,19 +314,19 @@ S-Channel command word format: `0x2800XXXX`; DMA path: `FUN_10324084` → `FUN_1
 Key data: `../docs/reverse-engineering/initialization-sequence.md`, `../docs/reverse-engineering/SDK_AND_ASIC_CONFIG_FROM_SWITCH.md`
 
 #### 2c — Port Bringup + SerDes
-- [ ] Implement XLPORT/MAC register writes for port enable/disable
+- [x] Implement XLPORT/MAC register writes for port enable/disable (S-Channel; XLPORT block map)
 - [ ] Implement Warpcore WC-B0 SerDes MDIO init sequence (10G SFI mode)
 - [ ] Implement 40G port init (QSFP breakout)
-- [ ] Implement `bcm56846_port_enable_set()`, `bcm56846_port_speed_set()`, `bcm56846_port_link_status_get()`
+- [x] Implement `bcm56846_port_enable_set()`, `bcm56846_port_speed_set()`, `bcm56846_port_link_status_get()`
 - [ ] Test: `swp1` comes up, SFP transceiver negotiates, `ip link show swp1` shows LOWER_UP
 
 Key data: `../docs/reverse-engineering/PORT_BRINGUP_REGISTER_MAP.md`, `../docs/reverse-engineering/SERDES_WC_INIT.md`
 XLPORT formula: `block_base + 0x80000 + port_offset`; SerDes MDIO pages: 0x0008, 0x0a00, 0x1000, 0x3800
 
 #### 2d — L2 Table
-- [x] Implement `bcm56846_l2_addr_add(unit, l2_addr)`: pack L2_ENTRY 4 words (VALID, KEY_TYPE, VLAN, MAC, PORT, MODULE, STATIC), hash key `(MAC<<16)|(VLAN<<4)|KEY_TYPE`, linear probe 0..5; table write stub (S-Chan format TBD)
-- [x] Implement `bcm56846_l2_addr_delete(unit, mac, vid)`: hash key, probe, write VALID=0 at slot (stub)
-- [ ] Implement `bcm56846_l2_addr_get(unit, mac, vid, l2_addr)`: hash lookup + S-Channel READ
+- [x] Implement `bcm56846_l2_addr_add(unit, l2_addr)`: pack L2_ENTRY 4 words (VALID, KEY_TYPE, VLAN, MAC, PORT, MODULE, STATIC), hash key `(MAC<<16)|(VLAN<<4)|KEY_TYPE`, linear probe 0..5; S-Channel WRITE_MEMORY
+- [x] Implement `bcm56846_l2_addr_delete(unit, mac, vid)`: hash key, probe, write VALID=0 at slot
+- [x] Implement `bcm56846_l2_addr_get(unit, mac, vid, l2_addr)`: hash lookup + S-Channel READ
 - [ ] Implement L2_USER_ENTRY writes for guaranteed/BPDU entries
 - [ ] Test: add a static MAC, verify in hardware (after S-Chan write path)
 
@@ -334,12 +334,12 @@ Key data: `../docs/reverse-engineering/L2_ENTRY_FORMAT.md`, `../docs/reverse-eng
 L2_ENTRY: 131072 entries × 13 bytes, base `0x07120000`; KEY = `(MAC<<16)|(VLAN<<4)|(KEY_TYPE<<1)`
 
 #### 2e — L3 / ECMP
-- [ ] Implement `bcm56846_l3_intf_create()` / `bcm56846_l3_intf_destroy()`: EGR_L3_INTF (stubs in place)
-- [ ] Implement `bcm56846_l3_egress_create()`: write ING_L3_NEXT_HOP + EGR_L3_NEXT_HOP + EGR_L3_INTF
-- [ ] Implement `bcm56846_l3_route_add()`: write L3_DEFIP TCAM entry with prefix/mask
-- [ ] Implement `bcm56846_l3_route_delete()`: delete L3_DEFIP entry
-- [ ] Implement `bcm56846_l3_host_add()`: write L3_DEFIP host (/32) entry
-- [ ] Implement `bcm56846_l3_ecmp_create()`: write L3_ECMP + L3_ECMP_GROUP entries
+- [x] Implement `bcm56846_l3_intf_create()` / `bcm56846_l3_intf_destroy()`: EGR_L3_INTF
+- [x] Implement `bcm56846_l3_egress_create()`: write ING_L3_NEXT_HOP + EGR_L3_NEXT_HOP
+- [x] Implement `bcm56846_l3_route_add()`: write L3_DEFIP TCAM entry with prefix/mask
+- [x] Implement `bcm56846_l3_route_delete()`: delete L3_DEFIP entry
+- [x] Implement `bcm56846_l3_host_add()`: write L3_DEFIP host (/32) entry
+- [x] Implement `bcm56846_l3_ecmp_create()`: write L3_ECMP + L3_ECMP_GROUP entries
 - [ ] Test: add a route, verify ASIC forwards traffic to correct port without CPU involvement
 
 Key data: `../docs/reverse-engineering/L3_NEXTHOP_FORMAT.md`, `../docs/reverse-engineering/L3_ECMP_VLAN_WRITE_PATH.md`
@@ -347,19 +347,19 @@ Chain: `L3_DEFIP[prefix] → NEXT_HOP_INDEX → ING_L3_NEXT_HOP[idx] → PORT_NU
 EGR chain: `EGR_L3_NEXT_HOP[idx] → DA_MAC[62:15] + INTF_NUM[14:3] → EGR_L3_INTF[intf] → SA_MAC[80:33] + VLAN[24:13]`
 
 #### 2f — Packet I/O
-- [ ] Implement DMA ring setup for TX and RX channels (DCB layout from KNET source)
-- [ ] Implement `bcm56846_tx(unit, pkt, pkt_len, port)`: copy packet to DMA buffer, ring descriptor, start DMA
-- [ ] Implement RX: register DMA completion callback, deliver packet + ingress port metadata
-- [ ] Implement poll/interrupt mode for RX
+- [x] Implement DMA ring setup for TX and RX channels (DCB type 21, PKTIO_BDE_DMA_INTERFACE)
+- [x] Implement `bcm56846_tx(unit, pkt, pkt_len, port)`: copy packet to DMA buffer, DCB, kick CMICm DMA
+- [x] Implement RX: register DMA completion callback, deliver packet + ingress port metadata
+- [x] Implement poll/interrupt mode for RX (polling thread)
 - [ ] Test: inject ARP packet via TUN → verify it goes out ASIC port; receive ARP reply from ASIC
 
 Key data: `../docs/reverse-engineering/DMA_DCB_LAYOUT_FROM_KNET.md`, `../docs/reverse-engineering/PACKET_BUFFER_ANALYSIS.md`
 DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointer + metadata
 
 #### 2g — VLAN
-- [ ] Implement `bcm56846_vlan_create(unit, vid)`
-- [ ] Implement `bcm56846_vlan_port_add(unit, vid, port, tagged)`
-- [ ] Implement `bcm56846_vlan_destroy(unit, vid)`
+- [x] Implement `bcm56846_vlan_create(unit, vid)` (VLAN + EGR_VLAN tables, shadow bitmaps)
+- [x] Implement `bcm56846_vlan_port_add(unit, vid, port, tagged)`
+- [x] Implement `bcm56846_vlan_destroy(unit, vid)`
 - [ ] Test: create VLAN, add ports, verify inter-VLAN and intra-VLAN forwarding
 
 ### Phase 3 — nos-switchd

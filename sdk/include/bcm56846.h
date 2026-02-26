@@ -46,6 +46,9 @@ int bcm56846_vlan_create(int unit, uint16_t vid);
 int bcm56846_vlan_port_add(int unit, uint16_t vid, int port, int tagged);
 int bcm56846_vlan_destroy(int unit, uint16_t vid);
 
+/* Stats (XLMAC counters; RE: STATS_COUNTER_FORMAT.md) */
+int bcm56846_stat_get(int unit, int port, bcm56846_stat_t stat, uint64_t *value);
+
 /* Packet I/O */
 int bcm56846_tx(int unit, int port, const void *pkt, int len);
 int bcm56846_rx_register(int unit, bcm56846_rx_cb_t cb, void *cookie);

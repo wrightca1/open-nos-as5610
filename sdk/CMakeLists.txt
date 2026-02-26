@@ -18,6 +18,7 @@ set(SDK_SOURCES
   src/ecmp.c
   src/vlan.c
   src/pktio.c
+  src/stats.c
 )
 
 add_library(bcm56846 SHARED ${SDK_SOURCES})

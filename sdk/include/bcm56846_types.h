@@ -34,4 +34,11 @@ typedef struct {
 	int      egress_id;
 } bcm56846_l3_host_t;
 
+typedef enum {
+	BCM56846_STAT_RPKT,
+	BCM56846_STAT_RBYT,
+	BCM56846_STAT_TPKT,
+	BCM56846_STAT_TBYT,
+} bcm56846_stat_t;
+
 #endif

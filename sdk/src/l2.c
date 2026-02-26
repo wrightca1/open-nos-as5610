@@ -15,6 +15,7 @@
 #define KEY_TYPE_L2       0
 
 extern int schan_write_memory(int unit, uint32_t addr, const uint32_t *data, int num_words);
+extern int schan_read_memory(int unit, uint32_t addr, uint32_t *data, int num_words);
 
 /* Hash key: (MAC<<16)|(VLAN<<4)|(KEY_TYPE<<1)|0. VALID=0 in key. */
 static uint64_t l2_hash_key(const uint8_t mac[6], uint16_t vid)
@@ -56,11 +57,32 @@ static int l2_table_write(int unit, int index, const uint32_t *words)
 	return schan_write_memory(unit, addr, words, L2_ENTRY_WORDS);
 }
 
+/* Read L2_ENTRY at index via S-Channel READ_MEMORY. */
+static int l2_table_read(int unit, int index, uint32_t *words)
+{
+	uint32_t addr = L2_ENTRY_BASE + (uint32_t)index * L2_ENTRY_STRIDE;
+	return schan_read_memory(unit, addr, words, L2_ENTRY_WORDS);
+}
+
 /* Delete: write all-zero (VALID=0) at index. */
 static int l2_table_delete_at(int unit, int index)
 {
 	uint32_t words[L2_ENTRY_WORDS] = { 0, 0, 0, 0 };
 	return l2_table_write(unit, index, words);
+}
+
+/* Unpack 4 words into l2_addr (VALID, VLAN, MAC, PORT, STATIC). */
+static void l2_unpack_entry(const uint32_t *words, bcm56846_l2_addr_t *addr)
+{
+	addr->vid = (uint16_t)((words[0] >> 4) & 0xfff);
+	addr->mac[0] = (uint8_t)(words[0] >> 24);
+	addr->mac[1] = (uint8_t)(words[0] >> 16);
+	addr->mac[2] = (uint8_t)(words[1] >> 24);
+	addr->mac[3] = (uint8_t)(words[1] >> 16);
+	addr->mac[4] = (uint8_t)(words[1] >> 8);
+	addr->mac[5] = (uint8_t)words[1];
+	addr->port = (int)(words[2] & 0x7f);
+	addr->static_entry = ((words[2] >> 29) & 1u) ? 1 : 0;
 }
 
 int bcm56846_l2_addr_add(int unit, const bcm56846_l2_addr_t *addr)
@@ -108,10 +130,33 @@ int bcm56846_l2_addr_delete(int unit, const uint8_t mac[6], uint16_t vid)
 
 int bcm56846_l2_addr_get(int unit, const uint8_t mac[6], uint16_t vid, bcm56846_l2_addr_t *out)
 {
-	(void)unit;
-	(void)mac;
-	(void)vid;
-	(void)out;
-	/* TODO: S-Channel read at hash index, parse words into out */
-	return -ENOSYS;
+	uint32_t words[L2_ENTRY_WORDS];
+	uint64_t key;
+	int index;
+	int probe;
+
+	if (!mac || !out)
+		return -EINVAL;
+	key = l2_hash_key(mac, vid);
+	index = (int)(key % L2_ENTRY_ENTRIES);
+	if (index < 0)
+		index += L2_ENTRY_ENTRIES;
+	for (probe = 0; probe < 6; probe++) {
+		int idx = (index + probe) % L2_ENTRY_ENTRIES;
+		if (l2_table_read(unit, idx, words) != 0)
+			continue;
+		if ((words[0] & 1u) == 0)
+			continue;
+		/* Compare MAC and VID (same layout as pack). */
+		if (((words[0] >> 4) & 0xfff) != (vid & 0xfff))
+			continue;
+		if ((uint8_t)(words[0] >> 24) != mac[0] || (uint8_t)(words[0] >> 16) != mac[1])
+			continue;
+		if ((uint8_t)(words[1] >> 24) != mac[2] || (uint8_t)(words[1] >> 16) != mac[3] ||
+		    (uint8_t)(words[1] >> 8) != mac[4] || (uint8_t)words[1] != mac[5])
+			continue;
+		l2_unpack_entry(words, out);
+		return 0;
+	}
+	return -ENOENT;
 }
