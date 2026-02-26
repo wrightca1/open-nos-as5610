@@ -25,6 +25,9 @@ int bcm56846_serdes_init_10g(int unit, int port);
 int bcm56846_l2_addr_add(int unit, const bcm56846_l2_addr_t *addr);
 int bcm56846_l2_addr_delete(int unit, const uint8_t mac[6], uint16_t vid);
 int bcm56846_l2_addr_get(int unit, const uint8_t mac[6], uint16_t vid, bcm56846_l2_addr_t *out);
+/* L2_USER_ENTRY (TCAM): guaranteed/BPDU entries; 512 entries, 20 bytes. */
+int bcm56846_l2_user_entry_add(int unit, const bcm56846_l2_user_addr_t *addr, int *index);
+int bcm56846_l2_user_entry_delete(int unit, int index);
 
 /* L3 Interface (EGR_L3_INTF: SA_MAC + VLAN per interface) */
 int bcm56846_l3_intf_create(int unit, const uint8_t mac[6], uint16_t vid, int *intf_id);

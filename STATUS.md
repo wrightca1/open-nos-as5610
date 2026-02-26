@@ -10,7 +10,7 @@
 |------|--------|-------|
 | **Build system** | ✅ Working | Build server (Debian, PPC32 cross), kernel + BDE + SDK + switchd + tests |
 | **Phase 1 — Boot + BDE** | ✅ Implemented | Kernel 5.10, BDE modules, S-Channel, validation test |
-| **Phase 2 — SDK** | 🟢 2a–2g implemented | Config, SOC runner, S-Chan, L2 add/delete, L3 intf/egress/route/ECMP, VLAN, port enable/link, pktio TX/RX. L2 get + stats + HW test pending. |
+| **Phase 2 — SDK** | 🟢 2a–2g + L2_USER_ENTRY | Config, SOC runner, S-Chan, L2 add/delete/get, L2_USER_ENTRY add/delete, L3/ECMP, VLAN, port+SerDes, pktio, stats. 40G + HW tests pending. |
 | **Phase 3 — nos-switchd** | 🟢 Core complete | Netlink→SDK for link/addr/route/neigh; link-state poll; TX/RX threads. Ready for HW/FRR test. |
 | **Phase 1a DTB/initramfs** | 🟢 Scripts in place | initramfs/build.sh, boot/build-fit.sh, nos.its (kernel+dtb+initramfs); DTB obtain from ONL/Cumulus |
 | **Hardware validation** | ⏳ Pending | Run `bde_validate` on AS5610 with BDE loaded |
@@ -40,8 +40,8 @@
 
 ### Phase 2 — Custom SDK (libbcm56846)
 - **2a:** [x] S-Channel and register access (BDE ioctl)
-- **2b:** [x] Config loader + SOC runner (setreg/getreg); sample config.bcm. [ ] rc.datapath_0/LED from capture, test on HW
-- **2c–2g:** [x] Port (enable/link), L2 add/delete, L3/ECMP, pktio, VLAN, SerDes MDIO (wc_b0 10G). [ ] 40G, L2 get/stats, HW tests.
+- **2b:** [x] Config loader + SOC runner; config.bcm. [x] rc.datapath_0/LED capture docs (etc/nos/README-CAPTURE.md).
+- **2c–2g:** [x] Port, SerDes 10G, L2 add/delete/get, L2_USER_ENTRY add/delete, L3/ECMP, pktio, VLAN, stats. [ ] 40G, HW tests.
 
 ### Phase 3 — nos-switchd
 - [x] TUN, ports.conf, netlink (NEWLINK, NEWADDR/DELADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr+cache), link-state, TX/RX. [x] SDK L2/L3/intf/ECMP/VLAN/port/pktio (Phase 2c–2g). [ ] L2 get, stats, HW validation.
@@ -50,8 +50,14 @@
 - [x] install.sh (self-extracting), platform.conf, platform.fdisk, uboot_env, rootfs/build.sh, onie-installer/build.sh → .bin
 - [ ] Test on switch: onie-nos-install → boot our NOS
 
+### Phase 4 — FRR
+- [x] FRR PPC32: rootfs apt install frr; from-source in docs/FRR-PPC32.md. [ ] BGP/OSPF config, ECMP/BFD tests on HW.
+
+### Phase 5 — Platform
+- [x] platform-mgrd scaffold (platform/platform-mgrd: hwmon thermal poll). [ ] ONLP or full CPLD/fan/PSU/LED.
+
 ### Later
-- Phase 4 (FRR integration), Phase 5 (platform)
+- All remaining items are HW tests or optional (40G, BFD, ONLP integration).
 
 ---
 
@@ -73,7 +79,7 @@ open-nos-as5610/
 ├── initramfs/          # init script, build.sh (scaffolding)
 ├── boot/               # nos.its FIT template, README (DTB instructions)
 ├── rootfs/             # build.sh (debootstrap PPC32 + squashfs), overlay/ (fstab, systemd units)
-├── platform/           # README only
+├── platform/           # platform-mgrd (minimal hwmon daemon), README
 └── onie-installer/     # install.sh, build.sh, platform.conf, platform.fdisk, uboot_env/ → .bin
 ```
 

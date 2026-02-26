@@ -160,3 +160,79 @@ int bcm56846_l2_addr_get(int unit, const uint8_t mac[6], uint16_t vid, bcm56846_
 	}
 	return -ENOENT;
 }
+
+/* --- L2_USER_ENTRY (TCAM): 0x06168000, 512 entries × 20 bytes (5 words). RE: L2_ENTRY_FORMAT.md §2 --- */
+#define L2_USER_ENTRY_BASE    0x06168000u
+#define L2_USER_ENTRY_COUNT   512
+#define L2_USER_ENTRY_WORDS   5
+
+static int l2_user_table_write(int unit, int index, const uint32_t *words)
+{
+	uint32_t addr = L2_USER_ENTRY_BASE + (uint32_t)index * (L2_USER_ENTRY_WORDS * 4);
+	return schan_write_memory(unit, addr, words, L2_USER_ENTRY_WORDS);
+}
+
+static int l2_user_table_read(int unit, int index, uint32_t *words)
+{
+	uint32_t addr = L2_USER_ENTRY_BASE + (uint32_t)index * (L2_USER_ENTRY_WORDS * 4);
+	return schan_read_memory(unit, addr, words, L2_USER_ENTRY_WORDS);
+}
+
+/* Pack 5 words: KEY (VALID, MAC, VLAN, KEY_TYPE), MASK (61 bits), DATA (PRI, CPU, PORT_NUM, BPDU). */
+static void l2_user_pack(const bcm56846_l2_user_addr_t *addr, uint32_t *words)
+{
+	uint64_t mac48 = (uint64_t)addr->mac[0] << 40 | (uint64_t)addr->mac[1] << 32 |
+			 (uint64_t)addr->mac[2] << 24 | (uint64_t)addr->mac[3] << 16 |
+			 (uint64_t)addr->mac[4] << 8 | addr->mac[5];
+	uint64_t mask = addr->mask;
+	uint16_t vid = addr->vid & 0xfff;
+	int port = addr->port & 0x7f;
+
+	/* word[0]: VALID=1, MAC[30:0] in bits[31:1] */
+	words[0] = (1u) | ((uint32_t)(mac48 & 0x7fffffffu) << 1);
+	/* word[1]: MAC[47:31] in bits[16:0], VLAN[28:17], KEY_TYPE@29, MASK[1:0]@31:30 */
+	words[1] = (uint32_t)((mac48 >> 31) & 0x1ffffu) |
+		  ((uint32_t)(vid & 0xfff) << 17) |
+		  ((uint32_t)(addr->key_type & 1) << 29) |
+		  ((uint32_t)(mask & 3u) << 30);
+	/* word[2]: MASK[33:2] */
+	words[2] = (uint32_t)((mask >> 2) & 0xffffffffu);
+	/* word[3]: MASK[61:34], PRI=0, RPE=0. Entry mask: word[3] bit 31 invalid → use 0x7fffffff */
+	words[3] = (uint32_t)((mask >> 34) & 0x7fffffffu);
+	/* word[4]: RPE=0, CPU, DST_DISCARD=0, PORT_NUM[9:3], BPDU@26. Entry mask: bits 31:29 invalid → 0x1fffffff */
+	words[4] = ((uint32_t)(addr->copy_to_cpu & 1) << 1) |
+		   ((uint32_t)(port & 0x7f) << 3) |
+		   ((uint32_t)(addr->bpdu & 1) << 26);
+}
+
+int bcm56846_l2_user_entry_add(int unit, const bcm56846_l2_user_addr_t *addr, int *index_out)
+{
+	uint32_t words[L2_USER_ENTRY_WORDS];
+	int i;
+
+	if (!addr)
+		return -EINVAL;
+	l2_user_pack(addr, words);
+	/* Find first free slot (VALID=0). */
+	for (i = 0; i < L2_USER_ENTRY_COUNT; i++) {
+		uint32_t read_back[L2_USER_ENTRY_WORDS];
+		if (l2_user_table_read(unit, i, read_back) != 0)
+			continue;
+		if ((read_back[0] & 1u) == 0) {
+			if (l2_user_table_write(unit, i, words) != 0)
+				return -EIO;
+			if (index_out)
+				*index_out = i;
+			return 0;
+		}
+	}
+	return -ENOSPC;
+}
+
+int bcm56846_l2_user_entry_delete(int unit, int index)
+{
+	uint32_t words[L2_USER_ENTRY_WORDS] = { 0, 0, 0, 0, 0 };
+	if (index < 0 || index >= L2_USER_ENTRY_COUNT)
+		return -EINVAL;
+	return l2_user_table_write(unit, index, words);
+}

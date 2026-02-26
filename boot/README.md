@@ -8,9 +8,7 @@
 Obtain or build `as5610_52x.dtb` for P2020/AS5610-52X:
 
 - **ONL**: Use `as5610_52x.dts` from the ONL tree; compile with `dtc -I dts -O dtb -o as5610_52x.dtb as5610_52x.dts`.
-- **Cumulus**: Extract from an existing Cumulus FIT:  
-  `dumpimage -l <Cumulus.itb>` (note the FDT subimage index), then  
-  `dumpimage -i <Cumulus.itb> -p <index> -o as5610_52x.dtb`.
+- **Cumulus**: Run `../scripts/extract-dtb.sh <CumulusLinux-*.bin> [as5610_52x.dtb]` (uses dumpimage; from repo root: `./scripts/extract-dtb.sh /path/to/Cumulus.bin boot/as5610_52x.dtb`).
 
 ## Build steps
 

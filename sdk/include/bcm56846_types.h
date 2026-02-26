@@ -13,6 +13,17 @@ typedef struct {
 	int       static_entry;
 } bcm56846_l2_addr_t;
 
+/* L2_USER_ENTRY (TCAM): guaranteed/BPDU entries; RE L2_ENTRY_FORMAT.md §2 */
+typedef struct {
+	uint8_t  mac[6];
+	uint16_t vid;
+	int      port;        /* 0..127 */
+	int      key_type;    /* 0=MAC only, 1=MAC+protocol */
+	int      copy_to_cpu; /* 1= punt to CPU */
+	int      bpdu;        /* 1= BPDU flag */
+	uint64_t mask;        /* 61-bit: same layout as KEY; 1=match, 0=don't care. 0x1000ffffffffffff = BPDU (any VLAN) */
+} bcm56846_l2_user_addr_t;
+
 typedef struct {
 	uint8_t  mac[6];
 	uint16_t vid;

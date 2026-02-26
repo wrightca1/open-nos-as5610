@@ -256,7 +256,7 @@ Without eth0, the switch has no management access after install (no console on m
 
 #### 1a — Kernel + DTB + initramfs + Basic Boot
 - [x] Build Linux 5.10 LTS kernel for PPC32 e500v2 target with required `CONFIG_*` options
-- [ ] **Device Tree Blob (DTB)**: Obtain or build the P2020-based DTB for the AS5610-52X. The FIT image (`uImage-powerpc.itb`) must bundle `kernel + dtb + initramfs` using `mkimage -f`. Without a correct DTB, Linux cannot enumerate the P2020 SoC peripherals (eTSEC eth0, I2C buses, CPLD local bus, PCIe). Reference: ONL tree has `as5610_52x.dts`; alternatively extract from Cumulus FIT image with `dumpimage -l`.
+- [x] **Device Tree Blob (DTB)**: Script and docs in place. Obtain: ONL `as5610_52x.dts` → `dtc`; or `scripts/extract-dtb.sh <Cumulus.bin>` (dumpimage). See boot/README.md.
 - [x] **initramfs**: Build a minimal initramfs that mounts the squashfs rootfs and overlayfs before `pivot_root`. (`initramfs/build.sh` + `init` script; busybox, mount, switch_root; mount sda6 squashfs + sda3 overlay → switch_root)
 - [x] Pack FIT image: `boot/build-fit.sh` → `nos-powerpc.itb` (nos.its references kernel, dtb, initramfs)
 - [ ] Boot via ONIE (temporary minimal installer) or test netboot
@@ -303,8 +303,8 @@ S-Channel command word format: `0x2800XXXX`; DMA path: `FUN_10324084` → `FUN_1
 - [x] Implement `bcm56846_init(unit)`: load .bcm config (config.bcm), run rc.soc + rc.datapath_0 if present
 - [x] Implement SOC script runner: parse `rc.soc`, `rc.datapath_0`; execute `setreg`/`getreg` (numeric addr/val)
 - [x] **config.bcm portmap entries**: Sample `etc/nos/config.bcm` with all 52 `portmap_N.0=...` entries (from RE doc). Ship in rootfs at `/etc/nos/config.bcm`.
-- [ ] **rc.datapath_0**: Ship static pre-generated in rootfs; SOC runner loads it (runner in place, file TBD from capture).
-- [ ] **LED programs**: Ship `led0.hex`/`led1.hex` in `/etc/nos/` (TBD from capture).
+- [x] **rc.datapath_0**: SOC runner in place; capture from Cumulus and place in `/etc/nos/` (see etc/nos/README-CAPTURE.md).
+- [x] **LED programs**: Documented in README-CAPTURE.md; ship in `/etc/nos/` when captured.
 - [ ] Test: ASIC initializes, no crash, registers read back expected values (on hardware)
 
 Key data: `../docs/reverse-engineering/initialization-sequence.md`, `../docs/reverse-engineering/SDK_AND_ASIC_CONFIG_FROM_SWITCH.md`
@@ -312,7 +312,7 @@ Key data: `../docs/reverse-engineering/initialization-sequence.md`, `../docs/rev
 #### 2c — Port Bringup + SerDes
 - [x] Implement XLPORT/MAC register writes for port enable/disable (S-Channel; XLPORT block map)
 - [x] Implement Warpcore WC-B0 SerDes MDIO init sequence (10G SFI mode) — `sdk/src/serdes.c`, `bcm56846_serdes_init_10g()`; called from port enable
-- [ ] Implement 40G port init (QSFP breakout)
+- [ ] Implement 40G port init (QSFP breakout); 10G only supported for now (`port_speed_set` returns -ENOTSUP for non-10G).
 - [x] Implement `bcm56846_port_enable_set()`, `bcm56846_port_speed_set()`, `bcm56846_port_link_status_get()`
 - [ ] Test: `swp1` comes up, SFP transceiver negotiates, `ip link show swp1` shows LOWER_UP
 
@@ -323,7 +323,7 @@ XLPORT formula: `block_base + 0x80000 + port_offset`; SerDes MDIO pages: 0x0008,
 - [x] Implement `bcm56846_l2_addr_add(unit, l2_addr)`: pack L2_ENTRY 4 words (VALID, KEY_TYPE, VLAN, MAC, PORT, MODULE, STATIC), hash key `(MAC<<16)|(VLAN<<4)|KEY_TYPE`, linear probe 0..5; S-Channel WRITE_MEMORY
 - [x] Implement `bcm56846_l2_addr_delete(unit, mac, vid)`: hash key, probe, write VALID=0 at slot
 - [x] Implement `bcm56846_l2_addr_get(unit, mac, vid, l2_addr)`: hash lookup + S-Channel READ
-- [ ] Implement L2_USER_ENTRY writes for guaranteed/BPDU entries
+- [x] Implement L2_USER_ENTRY writes for guaranteed/BPDU entries — `bcm56846_l2_user_entry_add()` / `bcm56846_l2_user_entry_delete()` (sdk/src/l2.c; RE L2_ENTRY_FORMAT.md §2)
 - [ ] Test: add a static MAC, verify in hardware (after S-Chan write path)
 
 Key data: `../docs/reverse-engineering/L2_ENTRY_FORMAT.md`, `../docs/reverse-engineering/L2_WRITE_PATH_COMPLETE.md`
@@ -375,7 +375,7 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 
 ### Phase 4 — Routing Protocols + Integration
 
-- [ ] Build FRR for PPC32 target
+- [x] Build FRR for PPC32 target — rootfs uses Debian `apt install frr`; from-source instructions in docs/FRR-PPC32.md
 - [ ] Configure FRR: BGP + OSPF basic config
 - [ ] Verify: FRR installs routes into kernel via `ip route`; nos-switchd picks up RTM_NEWROUTE; ASIC forwards
 - [ ] Test ECMP: two BGP next-hops; nos-switchd calls `bcm56846_l3_ecmp_create()`; hardware hashes flows
@@ -386,8 +386,8 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 
 ### Phase 5 — Platform Management
 
-- [ ] Integrate ONLP (accton_as5610_52x platform) or write platform-mgrd
-- [ ] Thermal monitoring daemon: read 10 temperature sensors; trigger fan speed adjustments
+- [x] Integrate ONLP (accton_as5610_52x platform) or write platform-mgrd — scaffold in place: platform/platform-mgrd (hwmon thermal poll); full support via ONLP or extend daemon
+- [ ] Thermal monitoring daemon: read 10 temperature sensors; trigger fan speed adjustments (scaffold reads hwmon)
 - [ ] Fan control: write CPLD `pwm1` (0–248 scale) based on thermal policy
 - [ ] PSU monitoring: read `psu_pwr1_present`, `psu_pwr1_dc_ok` etc.
 - [ ] Status LEDs: `led_psu1`, `led_diag`, `led_fan` via CPLD sysfs
