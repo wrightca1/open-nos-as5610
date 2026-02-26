@@ -78,6 +78,12 @@ if [ "$BUILD_ARTIFACTS" = "1" ]; then
 	else
 		log "BUILD_DIR ($BUILD_DIR) has no libbcm56846.so; copy build artifacts to staging or set BUILD_DIR."
 	fi
+	# platform-mgrd (PPC32)
+	if command -v powerpc-linux-gnu-gcc &>/dev/null; then
+		log "Building and installing platform-mgrd..."
+		make -C "$REPO_ROOT/platform/platform-mgrd" CROSS_COMPILE=powerpc-linux-gnu- clean all 2>/dev/null || true
+		make -C "$REPO_ROOT/platform/platform-mgrd" DESTDIR="$STAGING" install 2>/dev/null || true
+	fi
 fi
 
 # Default config from repo

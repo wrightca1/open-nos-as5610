@@ -21,7 +21,7 @@
 
 - **Kernel:** Linux 5.10 (85xx/mpc85xx_cds_defconfig), PPC32 uImage + modules
 - **BDE:** `nos_kernel_bde.ko`, `nos_user_bde.ko` — PCI probe, BAR0, 8MB DMA pool, S-Channel submit (DMA path), ioctl READ_REG/WRITE_REG/GET_DMA_INFO/SCHAN_OP, mmap DMA
-- **SDK:** `libbcm56846.so` — attach/detach/init, config.bcm, SOC runner, schan write/read_memory, reg; **port** (enable, link status via XLPORT map); **L2** add/delete (S-Chan WRITE_MEMORY); **L3** intf/egress/route/host + **ECMP** (table pack + S-Chan); **VLAN** (VLAN + EGR_VLAN + shadow); **pktio** (TX + RX DMA ring, DCB21). L2 get + stats module pending.
+- **SDK:** `libbcm56846.so` — attach/detach/init, config.bcm, SOC runner, schan write/read_memory, reg; **port** (enable, link, SerDes 10G); **L2** add/delete/get + **L2_USER_ENTRY** add/delete; **L3** intf/egress/route/host + **ECMP**; **VLAN**; **pktio** (TX/RX DCB21); **stats** (RPKT/RBYT/TPKT/TBYT).
 - **nos-switchd:** PPC32 executable — attach, init, TUN creation, netlink (NEWLINK→port enable, NEWADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr), link-state poll, TX thread, RX callback→TUN write.
 - **Tests:** `bde_validate` — READ_REG(0), mmap DMA write/read, READ_REG(0x32800)
 
@@ -44,7 +44,7 @@
 - **2c–2g:** [x] Port, SerDes 10G, L2 add/delete/get, L2_USER_ENTRY add/delete, L3/ECMP, pktio, VLAN, stats. [ ] 40G, HW tests.
 
 ### Phase 3 — nos-switchd
-- [x] TUN, ports.conf, netlink (NEWLINK, NEWADDR/DELADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr+cache), link-state, TX/RX. [x] SDK L2/L3/intf/ECMP/VLAN/port/pktio (Phase 2c–2g). [ ] L2 get, stats, HW validation.
+- [x] TUN, ports.conf, netlink (NEWLINK, NEWADDR/DELADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr+cache), link-state, TX/RX. [x] SDK complete (L2 get, stats, L2_USER_ENTRY, SerDes). [ ] HW validation.
 
 ### Phase 6 — ONIE installer
 - [x] install.sh (self-extracting), platform.conf, platform.fdisk, uboot_env, rootfs/build.sh, onie-installer/build.sh → .bin

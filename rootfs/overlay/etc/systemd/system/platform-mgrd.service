@@ -1,0 +1,10 @@
+[Unit]
+Description=open-nos-as5610 platform daemon (thermal, fan, PSU)
+After=network.target
+
+[Service]
+ExecStart=/usr/sbin/platform-mgrd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

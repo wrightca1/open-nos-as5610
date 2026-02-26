@@ -23,6 +23,15 @@ static int read_sysfs_int(const char *path, int *out)
 	return (val >= 0) ? 0 : -1;
 }
 
+static void scan_attr(const char *base, const char *name, const char *suffix, const char *unit)
+{
+	char path[320];
+	int val;
+	snprintf(path, sizeof(path), "%s/%s%s", base, name, suffix);
+	if (read_sysfs_int(path, &val) == 0)
+		printf("platform-mgrd: %s %s=%d %s\n", strrchr(base, '/') ? strrchr(base, '/') + 1 : base, name, val, unit);
+}
+
 static void poll_hwmon(void)
 {
 	DIR *d = opendir(SYS_HWMON);
@@ -32,11 +41,11 @@ static void poll_hwmon(void)
 		if (e->d_name[0] == '.') continue;
 		char base[256];
 		snprintf(base, sizeof(base), "%s/%s", SYS_HWMON, e->d_name);
-		char path[320];
-		int temp;
-		snprintf(path, sizeof(path), "%s/temp1_input", base);
-		if (read_sysfs_int(path, &temp) == 0)
-			printf("platform-mgrd: %s temp1=%d mC\n", e->d_name, temp);
+		scan_attr(base, "temp1_input", "", "mC");
+		scan_attr(base, "fan1_input", "", "RPM");
+		scan_attr(base, "fan2_input", "", "RPM");
+		scan_attr(base, "power1_input", "", "uW");
+		scan_attr(base, "power2_input", "", "uW");
 	}
 	closedir(d);
 }
