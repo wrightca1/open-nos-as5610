@@ -1,0 +1,26 @@
+#!/bin/sh
+# Minimal initramfs init for open-nos-as5610
+# Mounts squashfs + overlayfs then pivot_root to /sbin/init
+# Requires: busybox (sh, mount, switch_root), kernel with overlayfs + squashfs
+
+set -e
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+
+# Wait for root device (USB flash on AS5610)
+ROOT_DEV="${ROOT_DEV:-/dev/sda6}"
+OVERLAY_DEV="${OVERLAY_DEV:-/dev/sda3}"
+for i in 1 2 3 4 5 6 7 8 9 10; do
+	[ -b "$ROOT_DEV" ] && break
+	sleep 1
+done
+[ -b "$ROOT_DEV" ] || exec /bin/sh
+
+mkdir -p /newroot
+mount -t squashfs "$ROOT_DEV" /newroot -o ro
+[ -d "$OVERLAY_DEV/upper" ] && [ -d "$OVERLAY_DEV/work" ] && \
+	mount -t overlay overlay -o lowerdir=/newroot,upperdir=$OVERLAY_DEV/upper,workdir=$OVERLAY_DEV/work /newroot
+
+cd /newroot
+exec switch_root . /sbin/init

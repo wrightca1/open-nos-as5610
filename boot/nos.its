@@ -1,0 +1,50 @@
+# FIT image description for open-nos-as5610
+# Build: mkimage -f boot/nos.its -k /path/to/linux-5.10 -d /path/to/dtb boot/nos-powerpc.itb
+# Or with initramfs: set initramfs path below and uncomment the initramfs config part
+
+/dts-v1/;
+
+/ {
+	description = "open-nos-as5610 kernel + dtb";
+	#address-cells = <1>;
+
+	images {
+		kernel {
+			description = "Linux kernel";
+			data = /incbin/("uImage");
+			type = "kernel";
+			arch = "powerpc";
+			os = "linux";
+			compression = "gzip";
+			load = <0x0>;
+			entry = <0x0>;
+		};
+		fdt {
+			description = "Device Tree AS5610-52X";
+			data = /incbin/("as5610_52x.dtb");
+			type = "flat_dt";
+			arch = "powerpc";
+			compression = "none";
+		};
+		/* Uncomment when initramfs is built:
+		initramfs {
+			description = "initramfs";
+			data = /incbin/("initramfs.cpio.gz");
+			type = "ramdisk";
+			arch = "powerpc";
+			os = "linux";
+			compression = "gzip";
+		};
+		*/
+	};
+
+	configurations {
+		default = "conf";
+		conf {
+			description = "AS5610-52X boot";
+			kernel = "kernel";
+			fdt = "fdt";
+			/* ramdisk = "initramfs"; */
+		};
+	};
+};

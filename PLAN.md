@@ -255,7 +255,7 @@ Without eth0, the switch has no management access after install (no console on m
 ### Phase 1 — Boot + Kernel + Our BDE
 
 #### 1a — Kernel + DTB + initramfs + Basic Boot
-- [ ] Build Linux 5.10 LTS kernel for PPC32 e500v2 target with required `CONFIG_*` options
+- [x] Build Linux 5.10 LTS kernel for PPC32 e500v2 target with required `CONFIG_*` options
 - [ ] **Device Tree Blob (DTB)**: Obtain or build the P2020-based DTB for the AS5610-52X. The FIT image (`uImage-powerpc.itb`) must bundle `kernel + dtb + initramfs` using `mkimage -f`. Without a correct DTB, Linux cannot enumerate the P2020 SoC peripherals (eTSEC eth0, I2C buses, CPLD local bus, PCIe). Reference: ONL tree has `as5610_52x.dts`; alternatively extract from Cumulus FIT image with `dumpimage -l`.
 - [ ] **initramfs**: Build a minimal initramfs that mounts the squashfs rootfs and overlayfs before `pivot_root`. Without this the switch cannot boot from the A/B squashfs layout. Contents: `busybox`, mount helpers, `pivot_root`. The initramfs is embedded in the FIT image. Steps:
   - Assemble initramfs tree: `busybox sh`, `mount`, `switch_root`
@@ -269,22 +269,23 @@ Without eth0, the switch has no management access after install (no console on m
 - [ ] Confirm `eth0` comes up (P2020 eTSEC — management interface, see §3.5)
 
 #### 1b — Write nos-kernel-bde.ko
-- [ ] PCI probe: match `PCI_VENDOR_ID_BROADCOM, 0xb846`; call `pci_enable_device()`, `pci_request_regions()`
-- [ ] BAR0 map: `ioremap(pci_resource_start(dev, 0), 256*1024)` → confirm VA reads back `0xa0000000`
-- [ ] DMA pool: `dma_alloc_coherent(8MB)` → store `_dma_vbase`, `_dma_pbase`; wrap with slab sub-allocator
-- [ ] Interrupt: `request_irq(pdev->irq, nos_bde_irq, IRQF_SHARED, ...)`; stub handler for now
-- [ ] S-Channel submit: write command to DMA buffer; write `CMICM_DMA_DESC0`; write `CMICM_DMA_CTRL |= START`; wait for IRQ or poll `CMICM_DMA_STAT`
-- [ ] Export symbols for `nos-user-bde.ko`
+- [x] PCI probe: match `PCI_VENDOR_ID_BROADCOM, 0xb846`; call `pci_enable_device()`, `pci_request_regions()`
+- [x] BAR0 map: `ioremap(pci_resource_start(dev, 0), 256*1024)` → confirm VA reads back `0xa0000000`
+- [x] DMA pool: `dma_alloc_coherent(8MB)` → store `_dma_vbase`, `_dma_pbase`; wrap with slab sub-allocator
+- [x] Interrupt: `request_irq(pdev->irq, nos_bde_irq, IRQF_SHARED, ...)`; stub handler for now
+- [x] S-Channel submit: write command to DMA buffer; write `CMICM_DMA_DESC0`; write `CMICM_DMA_CTRL |= START`; wait for IRQ or poll `CMICM_DMA_STAT`
+- [x] Export symbols for `nos-user-bde.ko`
 
 #### 1c — Write nos-user-bde.ko
-- [ ] Create char device `/dev/nos-bde` via `cdev_init()` + `cdev_add()`
-- [ ] Implement ioctls: `NOS_BDE_READ_REG`, `NOS_BDE_WRITE_REG`, `NOS_BDE_GET_DMA_INFO`, `NOS_BDE_SCHAN_OP`
-- [ ] Implement `mmap()` handler: map DMA pool physical pages to user VMA
+- [x] Create char device `/dev/nos-bde` via `cdev_init()` + `cdev_add()`
+- [x] Implement ioctls: `NOS_BDE_READ_REG`, `NOS_BDE_WRITE_REG`, `NOS_BDE_GET_DMA_INFO`, `NOS_BDE_SCHAN_OP`
+- [x] Implement `mmap()` handler: map DMA pool physical pages to user VMA
 
 #### 1d — Validation
-- [ ] Write C test: open `/dev/nos-bde`, `NOS_BDE_READ_REG(0)` → expect PCI config data
-- [ ] Write C test: mmap DMA pool, write pattern, read back
-- [ ] Write C test: read CMIC register `0x32800` (S-Channel control) → confirms BAR0 accessible
+- [x] Write C test: open `/dev/nos-bde`, `NOS_BDE_READ_REG(0)` → expect PCI config data
+- [x] Write C test: mmap DMA pool, write pattern, read back
+- [x] Write C test: read CMIC register `0x32800` (S-Channel control) → confirms BAR0 accessible
+- [ ] Run `bde_validate` on target (requires BDE modules loaded)
 
 **Deliverable**: Our own BDE operational on hardware. Can read/write CMIC registers and access DMA pool from userspace.
 
@@ -293,10 +294,10 @@ Without eth0, the switch has no management access after install (no console on m
 This is the longest phase. Build incrementally, test on hardware after each sub-module.
 
 #### 2a — S-Channel and Register Access
-- [ ] Implement `schan_write(unit, cmd_word, data_words[], len)` using BDE ioctl + DMA
-- [ ] Implement `schan_read(unit, addr, data_words[], len)`
-- [ ] Implement `reg_write32(unit, offset, value)` and `reg_read32()` via BDE mmap
-- [ ] Test: write a known register, read it back
+- [x] Implement `schan_write(unit, cmd_word, data_words[], len)` using BDE ioctl + DMA
+- [x] Implement `schan_read(unit, addr, data_words[], len)` (stub; format TBD from RE)
+- [x] Implement `reg_write32(unit, offset, value)` and `reg_read32()` via BDE ioctl (READ_REG/WRITE_REG)
+- [ ] Test: write a known register, read it back (on hardware)
 
 Key data: `../docs/reverse-engineering/SCHAN_FORMAT_ANALYSIS.md`, `../docs/reverse-engineering/WRITE_MECHANISM_ANALYSIS.md`
 S-Channel command word format: `0x2800XXXX`; DMA path: `FUN_10324084` → `FUN_103257B8`

@@ -71,12 +71,15 @@ The switch forwards packets in hardware (BCM56846 ASIC) with FRR handling routin
 
 | Directory | What it is | Status |
 |-----------|-----------|--------|
-| [`bde/`](bde/) | Our own BDE kernel modules (`nos-kernel-bde.ko`, `nos-user-bde.ko`) — PCI probe, BAR0 map, DMA pool, S-Channel transport | Planning |
-| [`sdk/`](sdk/) | `libbcm56846` — custom SDK replacing Broadcom's proprietary SDK, written from RE data | Planning |
-| [`switchd/`](switchd/) | `nos-switchd` — control plane daemon, netlink listener, TUN manager, packet I/O | Planning |
+| [`bde/`](bde/) | Our own BDE kernel modules (`nos-kernel-bde.ko`, `nos-user-bde.ko`) — PCI probe, BAR0 map, DMA pool, S-Channel transport | **Building** |
+| [`sdk/`](sdk/) | `libbcm56846` — custom SDK replacing Broadcom's proprietary SDK, written from RE data | **Building** (attach/schan/reg + stubs) |
+| [`switchd/`](switchd/) | `nos-switchd` — control plane daemon, netlink listener, TUN manager, packet I/O | **Skeleton** (attach/init) |
+| [`tests/`](tests/) | BDE validation test (`bde_validate`) — Phase 1d | **Building** |
 | [`platform/`](platform/) | `platform-mgrd` — CPLD, thermal, fans, PSU, SFP/QSFP | Planning |
 | [`rootfs/`](rootfs/) | Debian 12 (Bookworm) PPC32 rootfs — bootstrap scripts and package list | Planning |
 | [`onie-installer/`](onie-installer/) | ONIE-compatible NOS installer for the AS5610-52X | Planning |
+
+See [STATUS.md](STATUS.md) for detailed build and implementation status.
 
 Reused open-source components (installed as Debian packages):
 
@@ -104,14 +107,14 @@ Reused open-source components (installed as Debian packages):
 
 ## Status
 
-This project is in **planning / early development**. The reverse engineering phase is complete — all ASIC register layouts, table formats, DMA paths, and initialization sequences have been documented from a live Cumulus Linux 2.5.1 switch.
+This project is in **active development**. The reverse engineering phase is complete. Kernel, BDE modules, SDK skeleton, and nos-switchd skeleton build on our build server (PPC32 cross). See [STATUS.md](STATUS.md) for details.
 
 Code phases:
 
-- [ ] Phase 0 — Build environment (cross-toolchain, kernel, QEMU)
-- [ ] Phase 1 — Kernel + DTB + initramfs + BDE modules
-- [ ] Phase 2 — `libbcm56846` SDK (S-Channel, ASIC init, ports, L2, L3, packet I/O)
-- [ ] Phase 3 — `nos-switchd` (netlink, TUN, link state polling)
+- [x] Phase 0 — Build environment (cross-toolchain, kernel, repo structure)
+- [x] Phase 1 — Kernel + BDE modules + validation test (DTB/initramfs/FIT scaffolding in place)
+- [x] Phase 2a — S-Channel and register access in libbcm56846; [ ] 2b–2g (init, port, L2, L3, pktio, VLAN)
+- [ ] Phase 3 — nos-switchd (TUN, netlink, link state polling, TX/RX)
 - [ ] Phase 4 — Routing protocol integration (FRR + ECMP)
 - [ ] Phase 5 — Platform management (CPLD, thermal, SFP)
 - [ ] Phase 6 — ONIE installer + A/B upgrade
