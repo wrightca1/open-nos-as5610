@@ -45,7 +45,8 @@ docker_fallback_build() {
           apt-get install -y -qq --no-install-recommends \
             ca-certificates git make cmake \
             gcc g++ \
-            gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
+            gcc-powerpc-linux-gnu g++-powerpc-linux-gnu binutils-powerpc-linux-gnu \
+            libc6-dev-powerpc-cross \
             bc libssl-dev libelf-dev flex bison \
             pkg-config file u-boot-tools
           ./scripts/remote-build.sh
