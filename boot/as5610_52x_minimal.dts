@@ -23,17 +23,25 @@
 		};
 	};
 
-	memory {
+	memory@0 {
 		device_type = "memory";
 		reg = <0x0 0x0 0x0 0x10000000>;
 	};
 
-	chosen {
-		bootargs = "root=/dev/sda6 rw";
-		stdout-path = "/soc@fffe00000/serial@4500";
+	/* U-Boot may resolve console from aliases; provide so path lookup succeeds */
+	aliases {
+		serial0 = "/soc@ffe00000/serial@4500";
 	};
 
-	soc@fffe00000 {
+	chosen {
+		bootargs = "root=/dev/sda6 rw";
+		/* Both required: U-Boot 2013.01 sets linux,stdout-path and fails with FDT_ERR_NOTFOUND if path missing */
+		stdout-path = "/soc@ffe00000/serial@4500";
+		linux,stdout-path = "/soc@ffe00000/serial@4500";
+	};
+
+	/* P2020 IMMR at 0xffe00000; unit address must match so U-Boot can resolve chosen stdout-path */
+	soc@ffe00000 {
 		compatible = "fsl,p2020-immr", "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;

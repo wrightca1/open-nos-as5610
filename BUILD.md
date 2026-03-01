@@ -37,6 +37,33 @@ The BDE modules build against a Linux 5.10 (or compatible) kernel source tree. O
    USE_BUILD_SERVER=modern ./scripts/build-on-build-server.sh
    ```
 
+### Toolchain note (SPE flags)
+
+`powerpc-linux-gnu-gcc` 12 (Debian bookworm) does not support `-mabi=spe`, `-mspe`, or `-mfloat-gprs=double`. These flags are for VxWorks/EABI bare-metal targets and conflict with the Linux glibc ABI. `tools/ppc32-toolchain.cmake` uses only `-mcpu=8548`.
+
+### Required kernel config options
+
+Beyond the baseline `mpc85xx_cds_defconfig`, `scripts/remote-build.sh` enables:
+
+```
+# Management Ethernet (P2020 eTSEC → eth0)
+CONFIG_NET_VENDOR_FREESCALE=y
+CONFIG_GIANFAR=y
+
+# I2C: chardev, mux, PCA9548/PCA9546 (SFP buses i2c-22..i2c-73)
+CONFIG_I2C_CHARDEV=y
+CONFIG_I2C_MUX=y
+CONFIG_I2C_MUX_PCA954X=y
+CONFIG_GPIO_PCA953X=y
+
+# Hwmon sensors (LM75, LM90); AT24 EEPROM → SFP sysfs
+CONFIG_SENSORS_LM75=y
+CONFIG_SENSORS_LM90=y
+CONFIG_EEPROM_AT24=y
+```
+
+Without `CONFIG_GIANFAR`, `eth0` (management) does not come up. Without `CONFIG_I2C_MUX_PCA954X`, SFP EEPROM buses are unavailable.
+
 ### After the build
 
 Artifacts on server (in `~/open-nos-as5610-build-YYYYMMDD-HHMMSS/`):
@@ -47,6 +74,7 @@ Artifacts on server (in `~/open-nos-as5610-build-YYYYMMDD-HHMMSS/`):
 | SDK | `build/sdk/libbcm56846.so`, `build/sdk/libbcm56846.a` |
 | nos-switchd | `build/switchd/nos-switchd` |
 | BDE validation test | `build/tests/bde_validate` (run on target, or under QEMU: `./scripts/run-bde-validate.sh`) |
+| platform-mgrd | `build/platform/platform-mgrd` |
 | Kernel (if BUILD_KERNEL=1) | `linux-5.10/arch/powerpc/boot/uImage` |
 
 Copy back (adjust host/path):
@@ -180,4 +208,8 @@ python3 -m http.server 8000 &
 # Install URL from switch (ONIE): onie-nos-install http://10.22.1.4:8000/open-nos-as5610-YYYYMMDD.bin
 ```
 
-See **docs/EDGECORE_AS5610_ONIE_PARTITIONS.md** for the partition table and boot flow.
+See **docs/EDGECORE_AS5610_ONIE_PARTITIONS.md** for the partition table and boot flow. See **docs/ONIE_INSTALLER_READINESS.md** for a checklist of what’s required to recreate our own ONIE installer for Debian.
+
+### Platform config (ONL-style)
+
+We use the same platform-config pattern as [Open Network Linux (ONL)](https://github.com/opencomputeproject/OpenNetworkLinux). The single source of truth is **`packages/platforms/accton/powerpc/as5610-52x/platform-config/r0/src/lib/powerpc-accton-as5610-52x-r0.yml`** (loader, FIT, U-Boot env, installer partitions, console). Implementation: `onie-installer/cumulus/init/accton_as5610_52x/` and `uboot_env/`. See **`packages/README.md`** and **`packages/platforms/accton/powerpc/as5610-52x/README.md`**.

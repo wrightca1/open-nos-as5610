@@ -66,17 +66,34 @@ if [ ! -f "$DTB_IMAGE" ]; then
     if [ -n "$REMOTE_DIR" ] && [ -f "$REPO_ROOT/boot/as5610_52x_minimal.dts" ]; then
         log "Building minimal DTB on server from boot/as5610_52x_minimal.dts..."
         scp "$REPO_ROOT/boot/as5610_52x_minimal.dts" "${BUILD_USER}@${BUILD_HOST}:${REMOTE_DIR}/boot/"
-        ssh "${BUILD_USER}@${BUILD_HOST}" "cd $REMOTE_DIR && ./linux-5.10/scripts/dtc/dtc -I dts -O dtb -o boot/as5610_52x.dtb boot/as5610_52x_minimal.dts 2>/dev/null" || true
+        ssh "${BUILD_USER}@${BUILD_HOST}" "cd $REMOTE_DIR && ./linux-5.10/scripts/dtc/dtc -I dts -O dtb -p 0x3000 -o boot/as5610_52x.dtb boot/as5610_52x_minimal.dts 2>/dev/null" || true
         scp "${BUILD_USER}@${BUILD_HOST}:${REMOTE_DIR}/boot/as5610_52x.dtb" "$REPO_ROOT/boot/as5610_52x.dtb" 2>/dev/null || true
     fi
     # Or build locally if dtc available
     if [ ! -f "$DTB_IMAGE" ] && command -v dtc &>/dev/null && [ -f "$REPO_ROOT/boot/as5610_52x_minimal.dts" ]; then
         log "Building minimal DTB locally..."
-        dtc -I dts -O dtb -o "$REPO_ROOT/boot/as5610_52x.dtb" "$REPO_ROOT/boot/as5610_52x_minimal.dts"
+        dtc -I dts -O dtb -p 0x3000 -o "$REPO_ROOT/boot/as5610_52x.dtb" "$REPO_ROOT/boot/as5610_52x_minimal.dts"
     fi
 fi
 if [ ! -f "$DTB_IMAGE" ]; then
     err "DTB required. Set DTB_IMAGE=<path> or CUMULUS_BIN=<Cumulus.bin>. Or add boot/as5610_52x_minimal.dts and run with build server (or install dtc). See boot/README.md"
+fi
+# Pad DTB so U-Boot has room to add chosen node (bootargs, etc.); otherwise bootm can hang after "Loading Device Tree ... OK"
+if [ -f "$DTB_IMAGE" ]; then
+    if command -v dtc &>/dev/null; then
+        log "Padding DTB for U-Boot fixups..."
+        dtc -I dtb -O dtb -p 0x3000 -o "${DTB_IMAGE}.padded" "$DTB_IMAGE" && mv "${DTB_IMAGE}.padded" "$DTB_IMAGE"
+    elif command -v docker &>/dev/null; then
+        log "Padding DTB for U-Boot fixups (via Docker)..."
+        DTB_DIR="$(cd "$(dirname "$DTB_IMAGE")" && pwd)" DTB_NAME="$(basename "$DTB_IMAGE")"
+        if docker run --rm -v "$DTB_DIR:/d:rw" -w /d debian:bookworm bash -c "apt-get update -qq && apt-get install -y -qq device-tree-compiler >/dev/null && dtc -I dtb -O dtb -p 0x3000 -o ${DTB_NAME}.padded ${DTB_NAME} && mv ${DTB_NAME}.padded ${DTB_NAME}"; then
+            : # padded
+        else
+            log "WARNING: DTB padding failed; boot may hang after 'Loading Device Tree ... OK'. Install dtc or Docker."
+        fi
+    else
+        log "WARNING: dtc and Docker not found; DTB not padded. Boot may hang. Install device-tree-compiler or Docker."
+    fi
 fi
 
 # --- 3. Initramfs ---
@@ -104,7 +121,7 @@ else
         scp "$DTB_IMAGE" "${BUILD_USER}@${BUILD_HOST}:${R}/boot/as5610_52x.dtb"
         scp "$INITRAMFS" "${BUILD_USER}@${BUILD_HOST}:${R}/boot/initramfs.cpio.gz"
         scp "$REPO_ROOT/boot/build-fit.sh" "$REPO_ROOT/boot/nos.its" "${BUILD_USER}@${BUILD_HOST}:${R}/boot/"
-        ssh "${BUILD_USER}@${BUILD_HOST}" "docker run --rm -v \$(pwd)/${R}:/work -w /work/boot debian:bookworm bash -c 'apt-get update -qq && apt-get install -y -qq u-boot-tools >/dev/null && ./build-fit.sh /work/boot/uImage /work/boot/as5610_52x.dtb /work/boot/initramfs.cpio.gz'"
+        ssh "${BUILD_USER}@${BUILD_HOST}" "docker run --rm -v \$(pwd)/${R}:/work -w /work/boot debian:bookworm bash -c 'apt-get update -qq && apt-get install -y -qq u-boot-tools device-tree-compiler >/dev/null && ./build-fit.sh /work/boot/uImage /work/boot/as5610_52x.dtb /work/boot/initramfs.cpio.gz'"
         scp "${BUILD_USER}@${BUILD_HOST}:${R}/boot/nos-powerpc.itb" "$REPO_ROOT/boot/nos-powerpc.itb"
     fi
     [ ! -f "$REPO_ROOT/boot/nos-powerpc.itb" ] && err "FIT build failed (install u-boot-tools for mkimage or ensure build server has Docker)"

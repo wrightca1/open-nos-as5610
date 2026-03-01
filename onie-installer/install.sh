@@ -8,10 +8,17 @@ INSTALLER_DIR="${INSTALLER_DIR:-/tmp/onie-nos-install}"
 ARCHIVE_MARKER="__ARCHIVE__"
 
 # Find archive boundary: payload is everything after the line __ARCHIVE__
-LINE=$(awk "/^${ARCHIVE_MARKER}\$/ { print NR; exit }" "$0")
+echo "Extracting installer payload..."
+# Only feed first 200 lines to awk (script is ~120 lines) so we don't read the whole 137MB file
+LINE=$(head -n 200 "$0" | awk "/^${ARCHIVE_MARKER}\$/ { print NR; exit }")
 [ -z "$LINE" ] && { echo "Invalid installer: __ARCHIVE__ not found"; exit 1; }
 SKIP=$(head -n "$LINE" "$0" | wc -c)
-dd if="$0" bs=1 skip="$SKIP" 2>/dev/null > /tmp/_nos_payload.bin
+# Use 4k blocks for speed (avoid single-byte dd which is extremely slow on 137MB)
+# Skip exactly SKIP bytes: first block may be partial, then copy rest in 4k chunks
+{
+  dd if="$0" bs=4096 skip=$((SKIP / 4096)) count=1 2>/dev/null | dd bs=1 skip=$((SKIP % 4096)) 2>/dev/null
+  dd if="$0" bs=4096 skip=$((SKIP / 4096 + 1)) 2>/dev/null
+} > /tmp/_nos_payload.bin
 
 # Extract control.tar.xz and data.tar from payload
 # Format: control.tar.xz (xz), then data.tar (uncompressed)
@@ -42,7 +49,12 @@ cd /tmp
 mkdir -p "$INSTALLER_DIR"
 cd "$INSTALLER_DIR"
 # Payload is data.tar only (see build.sh)
-tar -xf /tmp/_nos_payload.bin 2>/dev/null || { echo "Failed to extract payload"; exit 1; }
+# Extract only small files (control, platform, uboot_env); stream kernel/rootfs later to avoid /tmp size limits
+tar -xf /tmp/_nos_payload.bin control \
+	cumulus/init/accton_as5610_52x/platform.conf \
+	cumulus/init/accton_as5610_52x/platform.fdisk \
+	uboot_env \
+	2>/dev/null || { echo "Failed to extract installer metadata"; exit 1; }
 
 # Detect platform (ONIE)
 if [ -n "$onie_sysinfo" ]; then
@@ -71,7 +83,7 @@ if [ ! -b "/dev/${BLK_DEV}" ]; then
 fi
 
 # Load platform config
-CONF_DIR="cumulus/init/accton_as5610_52x"
+CONF_DIR="$INSTALLER_DIR/cumulus/init/accton_as5610_52x"
 blk_dev="$BLK_DEV"
 if [ -f "$CONF_DIR/platform.conf" ]; then
 	. "$CONF_DIR/platform.conf"
@@ -84,30 +96,40 @@ else
 	ro_part2="${blk_dev}8"
 fi
 
-# Partition and format
+# Partition and format (strip # comments only; keep blank lines for fdisk "default" answers)
 echo "Partitioning /dev/${BLK_DEV}..."
-fdisk -u /dev/${BLK_DEV} < "$CONF_DIR/platform.fdisk" 2>/dev/null || true
-mkfs.ext2 -q /dev/${persist_part} 2>/dev/null || true
-mkfs.ext2 -q /dev/${rw_rootpart} 2>/dev/null || true
+grep -v '^#' "$CONF_DIR/platform.fdisk" | fdisk -u /dev/${BLK_DEV} || { echo "Partitioning failed"; exit 1; }
+sync
+# Force kernel to re-read partition table (sda5/sda6 in single-slot layout)
+blockdev --rereadpt /dev/${BLK_DEV} 2>/dev/null || partprobe /dev/${BLK_DEV} 2>/dev/null || true
+sleep 1
+mkfs.ext2 -q /dev/${persist_part} || { echo "mkfs persist failed"; exit 1; }
+mkfs.ext2 -q /dev/${rw_rootpart} || { echo "mkfs rw-overlay failed"; exit 1; }
 
-# Install to both slots
+# Install kernel and rootfs (single-slot: sda5=kernel, sda6=rootfs)
 echo "Installing kernel and rootfs..."
-for slot in 1 2; do
-	kpart="kernel_part$slot"
-	rpart="ro_part$slot"
-	eval KDEV=\$$kpart
-	eval RDEV=\$$rpart
-	[ -f "uImage-powerpc.itb" ] && dd if="uImage-powerpc.itb" of="/dev/${KDEV}" bs=4k conv=fsync 2>/dev/null
-	[ -f "nos-powerpc.itb" ] && dd if="nos-powerpc.itb" of="/dev/${KDEV}" bs=4k conv=fsync 2>/dev/null
-	[ -f "sysroot.squash.xz" ] && dd if="sysroot.squash.xz" of="/dev/${RDEV}" bs=4k conv=fsync 2>/dev/null
-done
+KDEV="$kernel_part1"
+RDEV="$ro_part1"
+tar -xOf /tmp/_nos_payload.bin nos-powerpc.itb 2>/dev/null | dd of="/dev/${KDEV}" bs=4k conv=fsync || { echo "Kernel write to ${KDEV} failed"; exit 1; }
+tar -xOf /tmp/_nos_payload.bin sysroot.squash.xz 2>/dev/null | dd of="/dev/${RDEV}" bs=4k conv=fsync || { echo "Rootfs write to ${RDEV} failed"; exit 1; }
 
-# U-Boot environment
-if command -v fw_setenv >/dev/null 2>&1; then
-	fw_setenv bootsource flashboot 2>/dev/null || true
-	fw_setenv cl.active 1 2>/dev/null || true
-	fw_setenv cl.platform accton_as5610_52x 2>/dev/null || true
-fi
+# U-Boot environment: apply via script file (Cumulus/ONL style) so values are not mangled by shell.
+# Do NOT call onie-nos-mode -s; it sets nos_bootcmd=true and overwrites our full boot sequence.
+	if command -v fw_setenv >/dev/null 2>&1 && [ -d "$INSTALLER_DIR/uboot_env" ]; then
+	env_script="$INSTALLER_DIR/env.txt"
+	: > "$env_script"
+	for inc in common_env.inc as5610_52x.platform.inc; do
+		f="$INSTALLER_DIR/uboot_env/$inc"
+		[ -f "$f" ] || continue
+		sed '/^[	 ]*#/d' "$f" >> "$env_script"
+	done
+	fw_setenv -f -s "$env_script" 2>/dev/null || { echo "Warning: fw_setenv -s failed"; true; }
+	# CRITICAL: Override onie_boot_reason=install (set by ONIE as "sticky").
+	# Deleting the variable does not work reliably; setting it to 'nos'
+	# prevents check_boot_reason from re-entering ONIE install mode.
+	# To trigger reinstall from a running NOS: fw_setenv onie_boot_reason install && reboot
+	fw_setenv onie_boot_reason nos 2>/dev/null || true
+	fi
 
 echo "Install complete. Rebooting..."
 reboot

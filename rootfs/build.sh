@@ -1,14 +1,17 @@
 #!/bin/bash
-# Build Debian PPC32 rootfs and pack as squashfs for ONIE installer.
-# PPC32 was dropped after Debian 8 (jessie), so we use jessie + archive.debian.org.
-# Run on x86 build host with: debootstrap, qemu-user-static, squashfs-tools.
+# Build Debian jessie (powerpc) rootfs and pack as squashfs for ONIE installer.
+# Debian 8 jessie is the last Debian release with a powerpc (PPC32 BE) port.
 #
 # Usage:
 #   ./build.sh
 #   REPO_ROOT=/path BUILD_DIR=/path/build KERNEL_VERSION=5.10.0 ./build.sh
 #
-# Optional: set BUILD_ARTIFACTS=0 to skip copying our binaries (rootfs-only for testing).
-# Output: sysroot.squash.xz in onie-installer/ (or ROOTFS_OUT).
+# Requires (on x86 build host):
+#   debootstrap  +  qemu-user-static  (apt: debootstrap qemu-user-static)
+#   squashfs-tools                    (apt: squashfs-tools)
+#   OR: docker  (will auto-run inside debian:bookworm + install deps)
+#
+# Output: sysroot.squash.xz in onie-installer/ (or $ROOTFS_OUT)
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,70 +21,151 @@ OUT_DIR="${ROOTFS_OUT_DIR:-$REPO_ROOT/onie-installer}"
 OUT_FILE="${ROOTFS_OUT:-$OUT_DIR/sysroot.squash.xz}"
 KERNEL_VERSION="${KERNEL_VERSION:-5.10.0}"
 BUILD_ARTIFACTS="${BUILD_ARTIFACTS:-1}"
-# PPC32: last Debian with powerpc is jessie (Debian 8); use archive
-DEBIAN_SUITE="${DEBIAN_SUITE:-jessie}"
-DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://archive.debian.org/debian}"
+
+# Debian jessie archive (EOL; use archive.debian.org)
+JESSIE_MIRROR="${JESSIE_MIRROR:-http://archive.debian.org/debian}"
 
 log() { echo "[rootfs/build] $1"; }
 
-if ! command -v debootstrap &>/dev/null; then
-	echo "Need debootstrap. Install: apt-get install debootstrap qemu-user-static squashfs-tools"
-	exit 1
-fi
-if ! [ -x /usr/bin/qemu-ppc-static ] && ! [ -x /usr/bin/qemu-powerpc-static ]; then
-	echo "Need qemu-user-static for PPC32 second-stage. Install: apt-get install qemu-user-static"
-	exit 1
+IN_DOCKER="${IN_DOCKER:-0}"
+
+# --- Docker fallback ---
+# debootstrap + qemu-user-static are needed to build a PPC32 rootfs on x86.
+# Re-run inside debian:bookworm which can install both without issues.
+# --privileged is required for binfmt_misc registration (qemu-ppc-static).
+if [ "$IN_DOCKER" != "1" ] && ! command -v debootstrap &>/dev/null; then
+	if ! command -v docker &>/dev/null; then
+		echo "ERROR: need debootstrap (+ qemu-user-static) or Docker"
+		echo "  On Debian/Ubuntu: apt-get install debootstrap qemu-user-static squashfs-tools"
+		exit 1
+	fi
+	log "debootstrap not found; falling back to Docker (debian:bookworm)..."
+	exec docker run --rm --privileged \
+		-e IN_DOCKER=1 \
+		-e KERNEL_VERSION="${KERNEL_VERSION}" \
+		-e BUILD_ARTIFACTS="${BUILD_ARTIFACTS}" \
+		-e JESSIE_MIRROR="${JESSIE_MIRROR}" \
+		-v "$REPO_ROOT:/work" \
+		-w /work \
+		debian:bookworm \
+		bash -c "
+			set -e
+			export DEBIAN_FRONTEND=noninteractive
+			apt-get update -qq
+			apt-get install -y -qq --no-install-recommends \
+				debootstrap qemu-user-static binfmt-support \
+				squashfs-tools xz-utils ca-certificates >/dev/null
+			update-binfmts --enable 2>/dev/null || true
+			exec rootfs/build.sh
+		"
 fi
 
+# --- Prerequisites (native or inside Docker) ---
+for cmd in debootstrap mksquashfs; do
+	if ! command -v "$cmd" &>/dev/null; then
+		echo "Missing: $cmd"; exit 1
+	fi
+done
+
+# Find qemu-ppc-static for second-stage chroot
 QEMU_STATIC=""
 for q in /usr/bin/qemu-ppc-static /usr/bin/qemu-powerpc-static; do
 	[ -x "$q" ] && QEMU_STATIC="$q" && break
 done
-[ -z "$QEMU_STATIC" ] && { echo "qemu-ppc-static or qemu-powerpc-static not found"; exit 1; }
+if [ -z "$QEMU_STATIC" ]; then
+	echo "ERROR: qemu-ppc-static not found"
+	echo "  Install: apt-get install qemu-user-static"
+	exit 1
+fi
 
+# --- Stage 1: debootstrap (extract; no PPC32 execution yet) ---
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
+log "Stage 1: debootstrap --arch=powerpc jessie from ${JESSIE_MIRROR}..."
+debootstrap --arch=powerpc --foreign --no-check-gpg \
+	jessie "$STAGING" "$JESSIE_MIRROR"
 
-# Stage 1: foreign debootstrap (jessie is last Debian with powerpc)
-# archive.debian.org uses old release keys; skip GPG check for EOL
-log "debootstrap (foreign) $DEBIAN_SUITE powerpc..."
-debootstrap --arch=powerpc --foreign --no-check-gpg "$DEBIAN_SUITE" "$STAGING" "$DEBIAN_MIRROR"
+# Copy qemu-ppc-static so PPC32 binaries can run inside the chroot
+cp "$QEMU_STATIC" "$STAGING/usr/bin/"
 
-# Stage 2: second-stage inside chroot via QEMU
-cp "$QEMU_STATIC" "$STAGING/usr/bin/" 2>/dev/null || mkdir -p "$STAGING/usr/bin" && cp "$QEMU_STATIC" "$STAGING/usr/bin/"
-chroot "$STAGING" /debootstrap/debootstrap --second-stage
+# --- Stage 2: debootstrap second stage (runs PPC32 post-install scripts) ---
+log "Stage 2: debootstrap second stage (via $(basename "$QEMU_STATIC"))..."
+DEBIAN_FRONTEND=noninteractive chroot "$STAGING" /debootstrap/debootstrap --second-stage
 
-# APT sources (archive for jessie; no updates for EOL)
-log "Configuring APT..."
+# --- Configure apt sources ---
+# archive.debian.org jessie is EOL; Release file dates are in the past.
+# Disable valid-until check so apt doesn't refuse to use the archive.
 cat > "$STAGING/etc/apt/sources.list" <<EOF
-deb $DEBIAN_MIRROR $DEBIAN_SUITE main
+# Debian jessie (EOL) -- only archive.debian.org/debian main works for powerpc.
+# jessie-updates and jessie/updates (security) are 404 for powerpc on the archive.
+deb ${JESSIE_MIRROR} jessie main
 EOF
-# Allow deprecated repos for old release
-echo 'Acquire::Check-Valid-Until "false";' > "$STAGING/etc/apt/apt.conf.d/99no-check-valid-until"
+mkdir -p "$STAGING/etc/apt/apt.conf.d"
+cat > "$STAGING/etc/apt/apt.conf.d/99ignore-release-date" <<EOF
+Acquire::Check-Valid-Until "false";
+Acquire::AllowInsecureRepositories "true";
+EOF
 
-# Install packages (minimal set for NOS; jessie package names)
-log "Installing packages..."
-chroot "$STAGING" apt-get update -qq
-chroot "$STAGING" env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-	iproute2 openssh-server python3 ethtool tcpdump i2c-tools pciutils libpci3 \
-	ca-certificates 2>/dev/null || true
-# Optional: frr, ifupdown2, lldpd (may not be in jessie or have different names)
-chroot "$STAGING" env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-	frr ifupdown2 lldpd 2>/dev/null || true
+# --- Chroot bind mounts (required for apt post-install scripts + DNS) ---
+# Copy resolv.conf so the chroot can resolve archive.debian.org
+cp /etc/resolv.conf "$STAGING/etc/resolv.conf"
+# Bind mount /proc, /dev, /sys so post-install scripts work
+mount -t proc proc "$STAGING/proc" 2>/dev/null || true
+mount -o bind /dev "$STAGING/dev" 2>/dev/null || true
+mount -o bind /sys "$STAGING/sys" 2>/dev/null || true
+# Prevent services (dbus, sshd, etc.) from starting during apt-get install.
+# Without this, dbus starts inside the chroot and keeps /proc busy so umount fails.
+mkdir -p "$STAGING/usr/sbin"
+printf '#!/bin/sh\nexit 101\n' > "$STAGING/usr/sbin/policy-rc.d"
+chmod +x "$STAGING/usr/sbin/policy-rc.d"
+# Ensure cleanup on exit
+STAGING_CLEANUP="$STAGING"
+chroot_cleanup() {
+	# Kill any processes that may have started inside the chroot (e.g. dbus)
+	# Use chroot PID namespace: find processes with /proc/PID/root pointing to staging
+	for pid in $(ls /proc/ 2>/dev/null | grep -E '^[0-9]+$'); do
+		root=$(readlink /proc/$pid/root 2>/dev/null || true)
+		[ "$root" = "$STAGING_CLEANUP" ] && kill -9 "$pid" 2>/dev/null || true
+	done
+	# Lazy unmount (-l) detaches immediately even if mount is busy
+	umount -l "$STAGING_CLEANUP/proc" 2>/dev/null || true
+	umount -l "$STAGING_CLEANUP/dev" 2>/dev/null || true
+	umount -l "$STAGING_CLEANUP/sys" 2>/dev/null || true
+}
+trap chroot_cleanup EXIT
 
-# Our artifacts from build server or local build
+# --- Install packages ---
+log "Updating apt and installing packages..."
+DEBIAN_FRONTEND=noninteractive chroot "$STAGING" apt-get update -q || true
+DEBIAN_FRONTEND=noninteractive chroot "$STAGING" apt-get install -y -q \
+	--no-install-recommends \
+	--allow-unauthenticated \
+	iproute2 isc-dhcp-client openssh-server ethtool tcpdump \
+	i2c-tools pciutils u-boot-tools \
+	python3-minimal ca-certificates \
+	lldpd net-tools curl || true
+
+# Install systemd explicitly (default on jessie but ensure it's present)
+DEBIAN_FRONTEND=noninteractive chroot "$STAGING" apt-get install -y -q \
+	--no-install-recommends \
+	--allow-unauthenticated \
+	systemd systemd-sysv dbus || true
+
+# --- Our artifacts from build server or local build ---
 if [ "$BUILD_ARTIFACTS" = "1" ]; then
 	BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build}"
 	if [ -f "$BUILD_DIR/sdk/libbcm56846.so" ]; then
 		log "Installing libbcm56846.so, nos-switchd, BDE modules..."
 		mkdir -p "$STAGING/usr/lib" "$STAGING/usr/sbin" "$STAGING/lib/modules/$KERNEL_VERSION"
 		cp -f "$BUILD_DIR/sdk/libbcm56846.so" "$STAGING/usr/lib/"
-		[ -f "$BUILD_DIR/switchd/nos-switchd" ] && cp -f "$BUILD_DIR/switchd/nos-switchd" "$STAGING/usr/sbin/" && chmod +x "$STAGING/usr/sbin/nos-switchd"
+		[ -f "$BUILD_DIR/switchd/nos-switchd" ] && \
+			cp -f "$BUILD_DIR/switchd/nos-switchd" "$STAGING/usr/sbin/" && \
+			chmod +x "$STAGING/usr/sbin/nos-switchd"
 		for ko in "$REPO_ROOT/bde/nos_kernel_bde.ko" "$REPO_ROOT/bde/nos_user_bde.ko"; do
 			[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/"
 		done
 	else
-		log "BUILD_DIR ($BUILD_DIR) has no libbcm56846.so; copy build artifacts to staging or set BUILD_DIR."
+		log "BUILD_DIR ($BUILD_DIR) has no libbcm56846.so; skipping artifacts."
 	fi
 	# platform-mgrd (PPC32)
 	if command -v powerpc-linux-gnu-gcc &>/dev/null; then
@@ -91,7 +175,7 @@ if [ "$BUILD_ARTIFACTS" = "1" ]; then
 	fi
 fi
 
-# Default config from repo
+# --- Default NOS config ---
 mkdir -p "$STAGING/etc/nos"
 [ -f "$REPO_ROOT/etc/nos/config.bcm" ] && cp -f "$REPO_ROOT/etc/nos/config.bcm" "$STAGING/etc/nos/"
 if [ ! -f "$STAGING/etc/nos/ports.conf" ]; then
@@ -99,15 +183,44 @@ if [ ! -f "$STAGING/etc/nos/ports.conf" ]; then
 	echo "swp1=10G" >> "$STAGING/etc/nos/ports.conf"
 fi
 
-# Overlay files if present
+# --- Overlay files ---
 OVERLAY="$SCRIPT_DIR/overlay"
 if [ -d "$OVERLAY" ]; then
 	log "Applying overlay..."
-	cp -a "$OVERLAY"/* "$STAGING/"
+	cp -a "$OVERLAY"/. "$STAGING/"
 fi
+
+# --- Enable systemd services ---
+WANTS="$STAGING/etc/systemd/system/multi-user.target.wants"
+mkdir -p "$WANTS"
+for svc in nos-bde-modules nos-switchd platform-mgrd nos-boot-success; do
+	if [ -f "$STAGING/etc/systemd/system/${svc}.service" ]; then
+		ln -sfT "/etc/systemd/system/${svc}.service" "$WANTS/${svc}.service"
+		log "Enabled systemd service: $svc"
+	fi
+done
+
+# Required mount-points referenced in fstab
+mkdir -p "$STAGING/mnt/persist"
 
 # Hostname
 echo "as5610" > "$STAGING/etc/hostname"
+
+# Allow root SSH login (for initial setup; restrict in production)
+if [ -f "$STAGING/etc/ssh/sshd_config" ]; then
+	sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' "$STAGING/etc/ssh/sshd_config" || true
+fi
+
+# Empty root password for initial console access
+chroot "$STAGING" passwd -d root 2>/dev/null || true
+
+# Remove qemu-static and policy-rc.d from rootfs before packing
+rm -f "$STAGING/usr/bin/qemu-ppc-static" "$STAGING/usr/bin/qemu-powerpc-static" 2>/dev/null || true
+rm -f "$STAGING/usr/sbin/policy-rc.d" 2>/dev/null || true
+
+# Unmount bind mounts before squashing (kills chroot processes first)
+chroot_cleanup
+trap - EXIT
 
 log "Packing squashfs to $OUT_FILE..."
 mkdir -p "$(dirname "$OUT_FILE")"

@@ -1,7 +1,9 @@
 #!/bin/bash
 # Build minimal initramfs for open-nos-as5610 (PPC32).
+# Uses nos-init.c (static C init) instead of a shell script.
 # Produces: initramfs.cpio.gz
-# Requires: busybox (cross or native), or extract from Debian powerpc busybox-static
+#
+# Requires: powerpc-linux-gnu-gcc (or Docker) to compile nos-init.c
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,34 +13,30 @@ ROOT="${SCRIPT_DIR}/root"
 rm -rf "$ROOT"
 mkdir -p "$ROOT"/{bin,sbin,dev,proc,sys,newroot}
 
-# Init script
-cp "${SCRIPT_DIR}/init" "$ROOT/init"
-chmod +x "$ROOT/init"
+# Compile static C init (nos-init.c → /init in initramfs)
+INIT_SRC="${SCRIPT_DIR}/nos-init.c"
+INIT_BIN="${ROOT}/init"
 
-# Busybox: use cross-installed busybox or copy from sysroot
-if command -v powerpc-linux-gnu-gcc &>/dev/null; then
-	# If we have a static busybox for PPC32, copy it
-	if [ -x /usr/powerpc-linux-gnu/bin/busybox ]; then
-		cp /usr/powerpc-linux-gnu/bin/busybox "$ROOT/bin/busybox"
-	elif [ -x "${BUSYBOX_STATIC:-}" ]; then
-		cp "$BUSYBOX_STATIC" "$ROOT/bin/busybox"
+if [ -f "$INIT_SRC" ]; then
+	if command -v powerpc-linux-gnu-gcc &>/dev/null; then
+		echo "Compiling nos-init.c with powerpc-linux-gnu-gcc..."
+		powerpc-linux-gnu-gcc -static -Os -o "$INIT_BIN" "$INIT_SRC"
+		chmod +x "$INIT_BIN"
+	elif command -v docker &>/dev/null; then
+		echo "Compiling nos-init.c via Docker (debian:bookworm)..."
+		docker run --rm \
+			-v "$SCRIPT_DIR:/work" -w /work \
+			-e DEBIAN_FRONTEND=noninteractive \
+			debian:bookworm bash -c \
+			'apt-get update -qq && apt-get install -y -qq gcc-powerpc-linux-gnu >/dev/null 2>&1 && powerpc-linux-gnu-gcc -static -Os -o root/init nos-init.c && chmod +x root/init'
 	else
-		echo "WARN: No PPC32 busybox found. Install busybox-static:powerpc or set BUSYBOX_STATIC."
-		echo "Creating stub /bin/sh that runs init..."
-		echo '#!/bin/busybox sh' > "$ROOT/bin/sh"
-		chmod +x "$ROOT/bin/sh"
+		echo "ERROR: need powerpc-linux-gnu-gcc or Docker to compile nos-init.c"
+		exit 1
 	fi
 else
-	echo "WARN: powerpc-linux-gnu-gcc not found; initramfs may need native busybox for target."
+	echo "ERROR: nos-init.c not found at $INIT_SRC"
+	exit 1
 fi
-
-if [ -x "$ROOT/bin/busybox" ]; then
-	chroot "$ROOT" /bin/busybox --install -s /bin 2>/dev/null || true
-	[ -L "$ROOT/bin/sh" ] || ln -sf busybox "$ROOT/bin/sh"
-fi
-
-# Device nodes (optional; kernel can use devtmpfs)
-# mknod -m 622 "$ROOT/dev/console" c 5 1
 
 ( cd "$ROOT" && find . | cpio -o -H newc ) | gzip -9 > "$OUT"
-echo "Built: $OUT"
+echo "Built: $OUT ($(du -sh "$OUT" | cut -f1))"

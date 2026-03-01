@@ -1,0 +1,12 @@
+[Unit]
+Description=Reset U-Boot boot_count on successful NOS startup
+After=multi-user.target
+ConditionPathExists=/usr/sbin/nos-boot-success.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nos-boot-success.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

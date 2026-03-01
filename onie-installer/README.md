@@ -11,8 +11,7 @@ U-Boot (PowerPC P2020)
       → install.sh runs (under ONIE busybox)
         → detect platform: accton_as5610_52x
         → format_disk (partition /dev/sda per platform.fdisk)
-        → install kernel to sda5 (slot A), rootfs to sda6
-        → install kernel to sda7 (slot B), rootfs to sda8
+        → install kernel to sda5, rootfs to sda6 (single-slot)
         → set U-Boot env: cl.active=1, bootsource=flashboot
         → reboot
 ```
@@ -22,12 +21,10 @@ U-Boot (PowerPC P2020)
 ```
 /dev/sda (USB flash):
   sda1: persist    (ext2, sectors 8192–270273)
-  sda2: extended   (container)
-    sda5: kernel-A   (raw uImage FIT, 270336–303041)
-    sda6: rootfs-A   (squashfs, 303104–565185)
-    sda7: kernel-B   (raw uImage FIT, 565248–597953)
-    sda8: rootfs-B   (squashfs, 598016–end)
-  sda3: rw-overlay (ext2, 860160–end)
+  sda2: extended   (container, 2 logicals only)
+    sda5: kernel   (raw uImage FIT, 16 MiB)
+    sda6: rootfs   (squashfs, ~289 MiB)
+  sda3: rw-overlay (ext2, 895840–end)
 ```
 
 ## Build

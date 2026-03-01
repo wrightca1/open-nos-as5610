@@ -1,7 +1,4 @@
 /dts-v1/;
-/* FIT image description for open-nos-as5610
- * Build: mkimage -f boot/nos.its ...
- */
 
 / {
 	description = "PowerPC kernel, initramfs and FDT blobs";
@@ -28,21 +25,6 @@
 			type = "flat_dt";
 			arch = "powerpc";
 			compression = "none";
-			/* PowerPC/Linux often expects FDT below 16MB; U-Boot was loading at ~64MB and kernel could hang */
-			load = <0x00f00000>;
-			hash {
-				algo = "crc32";
-			};
-		};
-		initramfs {
-			description = "initramfs";
-			data = /incbin/("initramfs.cpio.gz");
-			type = "ramdisk";
-			arch = "powerpc";
-			os = "linux";
-			compression = "none";
-			/* U-Boot 2013.01 requires load address for ramdisk or fails with "Can't get ramdisk subimage load address!" */
-			load = <0x01000000>;
 			hash {
 				algo = "crc32";
 			};
@@ -58,14 +40,13 @@
 		accton_as5610_52x {
 			description = "Accton AS5610_52X";
 			kernel = "kernel";
-			ramdisk = "initramfs";
 			fdt = "accton_as5610_52x_dtb";
 		};
 		edgecore_as5610_52x {
 			description = "Edgecore AS5610_52X (alias)";
 			kernel = "kernel";
-			ramdisk = "initramfs";
 			fdt = "accton_as5610_52x_dtb";
 		};
 	};
 };
+

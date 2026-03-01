@@ -94,7 +94,7 @@
 | Component | Source | License | Notes |
 |-----------|--------|---------|-------|
 | **Linux kernel** | upstream kernel.org | GPL-2.0 | PPC32 big-endian, cross-compiled; must support tun.ko, i2c, PCI |
-| **Debian 8 (Jessie) PPC32** | archive.debian.org | Various (all OSS) | Base rootfs — `debootstrap --arch powerpc jessie` (last Debian with powerpc); provides dpkg/apt, libc, userspace |
+| **Void Linux (powerpc, musl)** | voidlinux.org | Various (all OSS) | Base rootfs — actively maintained, xbps package manager, powerpc big-endian 32-bit port, musl libc; replaces EOL Debian 8 (jessie) |
 | **FRRouting (FRR)** | github.com/FRRouting/frr | GPL-2.0 / LGPL | BGP, OSPF, ISIS, static, BFD — installed as Debian package |
 | **iproute2** | kernel.org | GPL-2.0 | Debian package |
 | **ifupdown2** | github.com/CumulusNetworks/ifupdown2 | GPL-2.0 | Interface configuration — Debian package |
@@ -386,12 +386,14 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 
 ### Phase 5 — Platform Management
 
-- [x] Integrate ONLP (accton_as5610_52x platform) or write platform-mgrd — scaffold in place: platform/platform-mgrd (hwmon thermal poll); full support via ONLP or extend daemon
-- [ ] Thermal monitoring daemon: read 10 temperature sensors; trigger fan speed adjustments (scaffold reads hwmon)
-- [ ] Fan control: write CPLD `pwm1` (0–248 scale) based on thermal policy
-- [ ] PSU monitoring: read `psu_pwr1_present`, `psu_pwr1_dc_ok` etc.
+- [x] Integrate ONLP (accton_as5610_52x platform) or write platform-mgrd — full daemon in platform/platform-mgrd/main.c
+- [x] Thermal monitoring: scan all `/sys/class/hwmon/hwmon*/tempN_input`; 4 PWM zones (35/45/55°C → PWM 64/128/200/248)
+- [x] Fan control: write CPLD `pwm1` (0–248 scale) at `/sys/devices/ff705000.localbus/ea000000.cpld/pwm1`
+- [x] PSU monitoring: `psu_pwr1_present`, `psu_pwr1_all_ok`, `psu_pwr2_present`, `psu_pwr2_all_ok` via CPLD sysfs
+- [x] CPLD watchdog keepalive: write `watch_dog_keep_alive` every 15s
+- [x] SFP EEPROM: `sfp_read_sysfs()` (at24 driver, `/sys/class/eeprom_dev/eeprom(N+6)/device/eeprom`) + `sfp_read_i2c()` fallback (`/dev/i2c-(21+N)`, ioctl I2C_SLAVE 0x50); reads SFF-8472 ID/vendor/PN/SN
 - [ ] Status LEDs: `led_psu1`, `led_diag`, `led_fan` via CPLD sysfs
-- [ ] SFP/QSFP presence and EEPROM read via i2c-22..i2c-73
+- [ ] CPLD kernel driver: `accton_as5610_52x_cpld.ko` OSS implementation (required for sysfs paths above to exist)
 
 Key data: `../docs/reverse-engineering/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`, `../docs/reverse-engineering/SFP_TURNUP_AND_ACCESS.md`
 
@@ -401,7 +403,7 @@ Key data: `../docs/reverse-engineering/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`
 - [x] Write `platform.conf` for accton_as5610_52x (cumulus/init/accton_as5610_52x/platform.conf)
 - [x] Write `platform.fdisk` (MBR layout: sda1 persist, sda5/6 slot A, sda7/8 slot B, sda3 rw-overlay)
 - [x] Write `uboot_env` fragments: `cl.active=1`, `bootsource=flashboot` (uboot_env/*.inc)
-- [x] Build rootfs: Debian 12 PPC32 rootfs (rootfs/build.sh: debootstrap + our artifacts + squashfs)
+- [ ] Build rootfs: Void Linux powerpc/musl rootfs (rootfs/build.sh: xbps-install + our artifacts + squashfs; replaces EOL Debian jessie)
 - [x] Package: `onie-installer/build.sh` → `open-nos-as5610-YYYYMMDD.bin` (data.tar with FIT + squashfs)
 - [ ] Test: factory-fresh switch → `onie-nos-install http://.../open-nos-as5610-YYYYMMDD.bin` → switch boots our NOS
 
@@ -840,32 +842,76 @@ The `rw-overlay` partition (sda3) is shared between both slots. On a slot switch
 
 ## 11. Build System
 
-### 11.1 Rootfs: Debian 8 (Jessie) PPC32
+### 11.1 Rootfs: Void Linux (powerpc, musl)
 
-The rootfs is a Debian system bootstrapped for `powerpc` (PPC32 big-endian). **Debian dropped 32-bit powerpc after Jessie**, so we use **Debian 8 (jessie)** from `archive.debian.org`.
+The rootfs is a **Void Linux** system for `powerpc` (PPC32 big-endian) with musl libc. Void Linux is the only actively maintained general-purpose distribution with a PPC32 big-endian port. Debian 8 (jessie) was EOL since 2020 and had ancient package versions incompatible with our Linux 5.10 kernel.
+
+**PPC32 distro landscape:**
+
+| Distro | PPC32 BE Support | Notes |
+|--------|-----------------|-------|
+| Void Linux | **Yes, active** | xbps packages, glibc or musl, modern versions |
+| Gentoo | Yes, active | Source-based (portage); flexible but slow builds |
+| Buildroot | Yes (build system) | Generates minimal rootfs; no runtime pkg manager |
+| Debian jessie | EOL 2020 | Last Debian with powerpc; glibc 2.19 (ancient) |
+| Alpine Linux | **No** | ppc64le (LE 64-bit) only; no PPC32 BE |
+| Arch Linux | **No** | No PPC32 port |
+| Ubuntu | Dropped after 16.04 | |
 
 **Bootstrap flow** (runs on x86 build host or in Docker on build server):
 
 ```bash
-# Stage 1: foreign debootstrap (--no-check-gpg for EOL archive)
-debootstrap --arch=powerpc --foreign --no-check-gpg jessie /mnt/rootfs \
-    http://archive.debian.org/debian
+# Download Void Linux powerpc musl base tarball
+VOID_VERSION=$(date +%Y%m%d)
+TARBALL="void-powerpc-musl-ROOTFS-${VOID_VERSION}.tar.xz"
+wget "https://repo-default.voidlinux.org/live/current/${TARBALL}"
 
-# Stage 2: complete inside QEMU user-mode emulation
+# Extract base system
+mkdir -p /mnt/rootfs
+tar -xJf "$TARBALL" -C /mnt/rootfs
+
+# Register QEMU PPC32 binfmt handler for chroot
 cp /usr/bin/qemu-ppc-static /mnt/rootfs/usr/bin/
-chroot /mnt/rootfs /debootstrap/debootstrap --second-stage
 
-# Stage 3: APT sources (archive; set Acquire::Check-Valid-Until "false" for EOL)
-# Stage 4: apt-get install iproute2 openssh-server python3 ethtool tcpdump i2c-tools pciutils frr ifupdown2 lldpd
-# Stage 5: copy our artifacts (libbcm56846.so, nos-switchd, BDE .ko), overlay, pack squashfs
+# Configure xbps repo and install packages
+xbps-install -r /mnt/rootfs -S
+xbps-install -r /mnt/rootfs -y \
+    iproute2 openssh ethtool tcpdump i2c-tools pciutils \
+    frr lldpd u-boot-tools python3
+
+# Apply overlay (runit sv scripts, configs)
+cp -a overlay/* /mnt/rootfs/
+
+# Pack squashfs
 mksquashfs /mnt/rootfs sysroot.squash.xz -comp xz
 ```
 
-**Why Debian Jessie:**
-- Last Debian release with official powerpc (32-bit) — Bookworm and later have no powerpc port
-- Full PPC32 package archive on archive.debian.org — FRR, iproute2, lldpd, openssh install with `apt`
-- Same approach as Cumulus (Debian 7) and ONL (Debian 8)
-- `debootstrap` + QEMU user-mode is the standard cross-bootstrap; rootfs can be built locally (Linux) or on build server in Docker via `scripts/build-onie-image.sh`
+**Init system: runit (not systemd)**
+
+Void Linux uses **runit** as PID 1. Services live in `/etc/sv/<name>/` and are enabled by symlinking to `/var/service/`. This replaces the systemd `.service` files in our overlay:
+
+```
+/etc/sv/nos-bde-modules/     ← replaces nos-bde-modules.service
+/etc/sv/nos-switchd/         ← replaces nos-switchd.service
+/etc/sv/platform-mgrd/       ← replaces platform-mgrd.service
+/etc/sv/nos-boot-success/    ← replaces nos-boot-success.service
+```
+
+Each `run` script is a simple shell script:
+```sh
+#!/bin/sh
+exec /usr/sbin/nos-switchd 2>&1
+```
+
+Enable on boot: `ln -s /etc/sv/nos-switchd /var/service/nos-switchd`
+
+**Why Void Linux over Debian jessie:**
+- Actively maintained (not EOL) — security fixes, modern packages
+- musl libc is lighter, faster, and has no glibc version compatibility landmines
+- FRR 9.x, iproute2 6.x, openssh 9.x — compatible with Linux 5.10
+- xbps is faster and lighter than apt
+- runit boot is simpler and faster than systemd for a NOS appliance
+- Same `squashfs + overlayfs` packaging model
 
 ### 11.2 Toolchain
 
@@ -874,8 +920,29 @@ Cross-compiler: `powerpc-linux-gnu-gcc` (from `gcc-powerpc-linux-gnu` Debian pac
 ```bash
 # Install on build host (x86 Debian/Ubuntu)
 apt-get install gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
-                qemu-user-static debootstrap
+                qemu-user-static xbps squashfs-tools wget
 ```
+
+**Critical version compatibility requirements:**
+
+| Component | Must match | Failure mode if wrong |
+|-----------|-----------|----------------------|
+| `nos_kernel_bde.ko` | Exact same kernel build | `disagrees about version of symbol struct module` on insmod |
+| `nos_user_bde.ko` | Exact same kernel build | Same |
+| `libbcm56846.so` | Rootfs glibc version | `GLIBC_2.xx not found` on exec |
+| `nos-switchd` | Rootfs glibc version | Same |
+| Rootfs (`VOID_ARCH`) | Must be `powerpc` (glibc) | If `powerpc-musl`: binaries crash, wrong dynamic linker path |
+
+**Correct build order** (avoids all version mismatches):
+```bash
+# 1. Build Void Linux rootfs staging (establishes target libc)
+cd rootfs && ./build.sh
+
+# 2. Build kernel + BDE + SDK/switchd (BDE uses same KERNEL_SRC; SDK uses rootfs sysroot)
+PPC32_SYSROOT=rootfs/staging BUILD_KERNEL=1 scripts/remote-build.sh
+```
+
+**If the kernel is rebuilt, BDE MUST be rebuilt against the new kernel tree.**
 
 ### 11.3 Kernel Build
 
@@ -1045,4 +1112,4 @@ All RE docs are in `docs/reverse-engineering/` in this repository (relative to r
 
 ---
 
-*Generated: 2026-02-26*
+*Generated: 2026-02-26 — Last updated: 2026-03-01*

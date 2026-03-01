@@ -1,0 +1,4 @@
+#!/bin/sh
+# Wait for BDE modules to be loaded
+while [ ! -e /dev/nos-bde ]; do sleep 1; done
+exec /usr/sbin/nos-switchd 2>&1

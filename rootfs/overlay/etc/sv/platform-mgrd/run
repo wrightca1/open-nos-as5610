@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/sbin/platform-mgrd 2>&1

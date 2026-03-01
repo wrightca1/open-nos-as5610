@@ -1,10 +1,14 @@
 [Unit]
-Description=open-nos-as5610 platform daemon (thermal, fan, PSU)
-After=network.target
+Description=NOS Platform Manager (fan/temp/LEDs)
+After=local-fs.target
 
 [Service]
+Type=simple
 ExecStart=/usr/sbin/platform-mgrd
 Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Load NOS BDE kernel modules (runs once; sv finish script prevents restart)
+KVER=$(uname -r)
+insmod "/lib/modules/$KVER/nos_kernel_bde.ko" 2>&1 || true
+insmod "/lib/modules/$KVER/nos_user_bde.ko" 2>&1 || true
+# Signal sv to not restart (oneshot-style: exit 0 after loading)
+exec sleep infinity

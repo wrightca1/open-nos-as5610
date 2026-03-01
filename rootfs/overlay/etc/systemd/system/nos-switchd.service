@@ -1,11 +1,15 @@
 [Unit]
-Description=open-nos-as5610 switch daemon
-After=nos-bde-modules.service network-pre.target
-Wants=nos-bde-modules.service
+Description=NOS Switch Daemon (BCM56846)
+After=nos-bde-modules.service
+Requires=nos-bde-modules.service
 
 [Service]
+Type=simple
 ExecStart=/usr/sbin/nos-switchd
 Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

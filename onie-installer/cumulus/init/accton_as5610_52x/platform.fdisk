@@ -1,6 +1,12 @@
 # fdisk script for AS5610-52X USB flash (MBR)
 # Usage: fdisk -u /dev/sda < platform.fdisk
-# Layout: sda1 persist, sda2 extended (sda5..sda8), sda3 rw-overlay
+#
+# Single-slot layout (avoids ONIE kernel exposing only 3 logicals: sda5/sda6/sda7).
+# Cumulus uses 4 logicals (sda5..sda8) but their installer runs in a full Linux
+# initramfs; ONIE's BusyBox/kernel on this device only exposes sda5,sda6,sda7.
+# So we use only 2 logicals: sda5=kernel, sda6=rootfs. No A/B slots.
+#
+# Layout: sda1 persist, sda2 extended (sda5, sda6 only), sda3 rw-overlay
 
 o
 n
@@ -12,7 +18,12 @@ n
 e
 2
 270274
-860097
+895839
+n
+p
+3
+895840
+
 n
 l
 270336
@@ -20,19 +31,7 @@ l
 n
 l
 303104
-565185
-n
-l
-565248
-597953
-n
-l
-598016
-860097
-n
-p
-3
-860160
+895839
 
 
 w

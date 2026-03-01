@@ -104,6 +104,69 @@ elif [ "$BUILD_KERNEL" = "1" ]; then
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- "$DEFCONFIG"
     # Enable loadable modules (required for BDE .ko) and TUN, I2C, PCI, etc. for AS5610
     ./scripts/config -e CONFIG_MODULES -e CONFIG_TUN -e CONFIG_PCI -e CONFIG_I2C -e CONFIG_HWMON 2>/dev/null || true
+    # Storage drivers required for USB flash boot (all built-in, not modules)
+    ./scripts/config \
+        -e CONFIG_BLK_DEV_SD \
+        -e CONFIG_USB_STORAGE \
+        -e CONFIG_USB_EHCI_HCD \
+        -e CONFIG_USB_EHCI_FSL \
+        -e CONFIG_SQUASHFS \
+        -e CONFIG_MSDOS_PARTITION \
+        -e CONFIG_OVERLAY_FS \
+        2>/dev/null || true
+    # Management Ethernet (P2020 eTSEC → eth0); without this no SSH after install
+    ./scripts/config \
+        -e CONFIG_NET_VENDOR_FREESCALE \
+        -e CONFIG_GIANFAR \
+        2>/dev/null || true
+    # I2C: chardev (/dev/i2c-*), mux support, PCA954x (PCA9548/PCA9546 on AS5610)
+    # GPIO: PCA953x (pca9506/pca9538 I/O expanders for SFP presence/LEDs)
+    ./scripts/config \
+        -e CONFIG_I2C_CHARDEV \
+        -e CONFIG_I2C_MUX \
+        -e CONFIG_I2C_MUX_PCA954X \
+        -e CONFIG_GPIO_PCA953X \
+        2>/dev/null || true
+    # Hwmon: LM75 (board temp sensors on i2c-9), NE1617A/LM90 (ASIC+board)
+    # AT24 EEPROM driver: binds to SFP 0x50 → /sys/class/eeprom_dev/eepromN/device/eeprom
+    ./scripts/config \
+        -e CONFIG_SENSORS_LM75 \
+        -e CONFIG_SENSORS_LM90 \
+        -e CONFIG_EEPROM_AT24 \
+        2>/dev/null || true
+
+    # Apply AS5610-52X machine description (fixes "No suitable machine description found")
+    # The DTB compatible "accton,as5610_52x" has no match in mainline Linux 5.10.
+    PATCH_DIR="$REPO_ROOT/boot/kernel-patches"
+    PLAT_85XX="arch/powerpc/platforms/85xx"
+    if [ -f "$PATCH_DIR/$PLAT_85XX/accton_as5610_52x.c" ]; then
+        log "Applying AS5610-52X machine description patch..."
+        cp "$PATCH_DIR/$PLAT_85XX/accton_as5610_52x.c" "$PLAT_85XX/"
+        # Add Kconfig entry if not already present
+        if ! grep -q "ACCTON_AS5610_52X" "$PLAT_85XX/Kconfig"; then
+            sed -i '/^endif # FSL_SOC_BOOKE/i\
+\
+config ACCTON_AS5610_52X\
+\tbool "Accton/Edgecore AS5610-52X"\
+\tselect DEFAULT_UIMAGE\
+\thelp\
+\t  Support for the Accton/Edgecore AS5610-52X switching platform.\
+\t  Matches DTB compatible strings "accton,as5610_52x" and "accton,5652".\
+' "$PLAT_85XX/Kconfig"
+        fi
+        # Add Makefile entry if not already present
+        if ! grep -q "ACCTON_AS5610_52X" "$PLAT_85XX/Makefile"; then
+            echo 'obj-$(CONFIG_ACCTON_AS5610_52X) += accton_as5610_52x.o' >> "$PLAT_85XX/Makefile"
+        fi
+        # Enable in config
+        ./scripts/config -e CONFIG_ACCTON_AS5610_52X 2>/dev/null || \
+            echo "CONFIG_ACCTON_AS5610_52X=y" >> .config
+        log "AS5610-52X machine description patch applied."
+    else
+        warn "Kernel patch not found at $PATCH_DIR/$PLAT_85XX/accton_as5610_52x.c -- skipping."
+        warn "Without this patch the kernel will panic: 'No suitable machine description found'"
+    fi
+
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- olddefconfig
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- uImage modules -j$(nproc)
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- modules_prepare
@@ -135,6 +198,9 @@ else
 fi
 
 # --- SDK + switchd (PPC32 userspace) ---
+# Compatibility requirement: nos-switchd and libbcm56846.so must link against the
+# same glibc that's in the rootfs. Set PPC32_SYSROOT to rootfs staging if available.
+# rootfs/build.sh must run first (or set PPC32_SYSROOT manually) for exact matching.
 cd "$REPO_ROOT"
 if [ -f "CMakeLists.txt" ] && [ -d "sdk" ] && [ -d "switchd" ]; then
     if ! command -v cmake &>/dev/null; then
@@ -142,6 +208,17 @@ if [ -f "CMakeLists.txt" ] && [ -d "sdk" ] && [ -d "switchd" ]; then
         export DEBIAN_FRONTEND=noninteractive
         sudo apt-get update -qq && sudo apt-get install -y -qq cmake || { warn "apt install cmake failed"; exit 1; }
     fi
+
+    # Use rootfs sysroot if built; otherwise cross-compile against default headers
+    ROOTFS_STAGING="${REPO_ROOT}/rootfs/staging"
+    if [ -d "$ROOTFS_STAGING/lib" ]; then
+        export PPC32_SYSROOT="$ROOTFS_STAGING"
+        log "Using rootfs sysroot for libc compatibility: $PPC32_SYSROOT"
+    else
+        warn "rootfs/staging not found. Run rootfs/build.sh first for exact libc matching."
+        warn "Building against default cross-sysroot (may have glibc version mismatch)."
+    fi
+
     log "Building SDK (libbcm56846) and nos-switchd..."
     rm -rf build
     cmake -DCMAKE_TOOLCHAIN_FILE=tools/ppc32-toolchain.cmake -B build . || {
@@ -157,3 +234,14 @@ if [ -f "CMakeLists.txt" ] && [ -d "sdk" ] && [ -d "switchd" ]; then
 else
     warn "No top-level CMakeLists.txt or sdk/switchd dirs; skipping SDK/switchd build."
 fi
+
+# --- Version matrix check ---
+log "Version matrix:"
+[ -n "$KERNEL_SRC" ] && log "  Kernel: $(make -s -C "$KERNEL_SRC" kernelversion 2>/dev/null || echo '?')"
+log "  GCC:    $(powerpc-linux-gnu-gcc -dumpversion 2>/dev/null || echo '?')"
+if [ -f "$ROOTFS_STAGING/lib/libc.so.6" ] || [ -f "$ROOTFS_STAGING/lib/powerpc-linux-gnu/libc.so.6" ]; then
+    LIBC_VER=$(chroot "$ROOTFS_STAGING" /lib/libc.so.6 --version 2>/dev/null | head -1 || echo '?')
+    log "  Target glibc: $LIBC_VER"
+fi
+[ -f "$REPO_ROOT/bde/nos_kernel_bde.ko" ] && \
+    log "  BDE vermagic: $(modinfo -F vermagic "$REPO_ROOT/bde/nos_kernel_bde.ko" 2>/dev/null || echo '?')"

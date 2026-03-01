@@ -18,6 +18,9 @@ boot/uImage
 boot/as5610_52x.dtb
 boot/initramfs.cpio.gz
 boot/nos-powerpc.itb
+boot/kernel.gz
+boot/as5610_52x_padded.dtb
+boot/initramfs.cpio.gz
 
 # IDE / OS
 .idea/

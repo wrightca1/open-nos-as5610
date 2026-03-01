@@ -1,0 +1,4 @@
+#!/bin/sh
+# Reset U-Boot boot_count after successful NOS startup.
+# Runs once at boot; runit will not restart it (exits 0 with sleep infinity).
+exec /usr/sbin/nos-boot-success.sh
