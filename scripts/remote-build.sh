@@ -110,7 +110,9 @@ elif [ "$BUILD_KERNEL" = "1" ]; then
         -e CONFIG_USB_STORAGE \
         -e CONFIG_USB_EHCI_HCD \
         -e CONFIG_USB_EHCI_FSL \
+        -e CONFIG_USB_EHCI_ROOT_HUB_TT \
         -e CONFIG_SQUASHFS \
+        -e CONFIG_SQUASHFS_XZ \
         -e CONFIG_MSDOS_PARTITION \
         -e CONFIG_OVERLAY_FS \
         2>/dev/null || true
