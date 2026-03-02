@@ -165,6 +165,7 @@ if [ "$BUILD_ARTIFACTS" = "1" ]; then
 			[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/"
 		done
 		depmod -b "$STAGING" "$KERNEL_VERSION" 2>/dev/null || true
+		chroot "$STAGING" ldconfig 2>/dev/null || true
 	else
 		log "BUILD_DIR ($BUILD_DIR) has no libbcm56846.so; skipping artifacts."
 	fi

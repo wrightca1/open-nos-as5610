@@ -234,7 +234,14 @@ if [ -f "CMakeLists.txt" ] && [ -d "sdk" ] && [ -d "switchd" ]; then
 
     log "Building SDK (libbcm56846) and nos-switchd..."
     rm -rf build
-    cmake -DCMAKE_TOOLCHAIN_FILE=tools/ppc32-toolchain.cmake -B build . || {
+    # Use the jessie rootfs staging dir as sysroot so binaries link against
+    # glibc 2.19 (jessie) instead of the build host's glibc 2.34 (bookworm).
+    SYSROOT_ARG=""
+    if [ -d "rootfs/staging/lib/powerpc-linux-gnu" ]; then
+        SYSROOT_ARG="-DPPC32_SYSROOT=$(pwd)/rootfs/staging"
+        log "Using jessie sysroot: $(pwd)/rootfs/staging"
+    fi
+    cmake -DCMAKE_TOOLCHAIN_FILE=tools/ppc32-toolchain.cmake $SYSROOT_ARG -B build . || {
         warn "CMake configure failed"
         exit 1
     }

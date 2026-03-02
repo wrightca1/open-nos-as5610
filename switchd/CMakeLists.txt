@@ -15,5 +15,9 @@ add_executable(nos-switchd
   src/link_state.c
   src/tx_rx.c
 )
-target_link_libraries(nos-switchd PRIVATE bcm56846)
-target_link_libraries(nos-switchd PRIVATE pthread)
+# Link statically to avoid glibc version mismatch between build host
+# (bookworm, glibc 2.34) and target (jessie, glibc 2.19).
+# -static links everything including libc/libpthread statically;
+# bcm56846_static is the static archive defined in sdk/CMakeLists.txt.
+target_link_options(nos-switchd PRIVATE -static)
+target_link_libraries(nos-switchd PRIVATE bcm56846_static pthread)
