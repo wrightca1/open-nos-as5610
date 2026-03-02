@@ -118,6 +118,15 @@ elif [ "$BUILD_KERNEL" = "1" ]; then
         -e CONFIG_DEVTMPFS \
         -e CONFIG_DEVTMPFS_MOUNT \
         2>/dev/null || true
+    # systemd requirements: cgroups (for /sys/fs/cgroup mount)
+    ./scripts/config \
+        -e CONFIG_CGROUPS \
+        -e CONFIG_CGROUP_DEVICE \
+        -e CONFIG_CGROUP_SCHED \
+        -e CONFIG_CGROUP_PIDS \
+        -e CONFIG_MEMCG \
+        -e CONFIG_CPUSETS \
+        2>/dev/null || true
     # Management Ethernet (P2020 eTSEC → eth0); without this no SSH after install
     ./scripts/config \
         -e CONFIG_NET_VENDOR_FREESCALE \
