@@ -8,6 +8,7 @@
  *   6. Fallback: if overlay fails, use /lower (squashfs only, read-only root)
  *   7. switch_root to /newroot → exec /sbin/init
  */
+#include <stdio.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -39,6 +40,19 @@ static int wait_blk(const char *dev, int major, int minor, int secs)
 	return -1;
 }
 
+/* Move /proc, /sys, /dev from initramfs into newroot so systemd has them. */
+static void move_mounts(const char *newroot)
+{
+	char dst[128];
+	const char *srcs[] = { "/proc", "/sys", "/dev", NULL };
+	const char **s;
+	for (s = srcs; *s; s++) {
+		snprintf(dst, sizeof(dst), "%s%s", newroot, *s);
+		if (mount(*s, dst, NULL, MS_MOVE, NULL) != 0)
+			; /* best-effort; systemd may remount */
+	}
+}
+
 static void do_switch_root(const char *newroot)
 {
 	char *const argv[] = { "/sbin/init", NULL };
@@ -46,6 +60,8 @@ static void do_switch_root(const char *newroot)
 		"HOME=/", "TERM=vt100",
 		"PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL
 	};
+
+	move_mounts(newroot);
 
 	if (chdir(newroot) != 0) { msg("chdir newroot failed"); return; }
 	if (mount(".", "/", NULL, MS_MOVE, NULL) != 0) { msg("MS_MOVE failed"); return; }

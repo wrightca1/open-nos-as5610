@@ -115,6 +115,8 @@ elif [ "$BUILD_KERNEL" = "1" ]; then
         -e CONFIG_SQUASHFS_XZ \
         -e CONFIG_MSDOS_PARTITION \
         -e CONFIG_OVERLAY_FS \
+        -e CONFIG_DEVTMPFS \
+        -e CONFIG_DEVTMPFS_MOUNT \
         2>/dev/null || true
     # Management Ethernet (P2020 eTSEC → eth0); without this no SSH after install
     ./scripts/config \
