@@ -18,7 +18,7 @@
 #define PCI_DEVICE_ID_BCM56846	0xb846
 
 #define BAR0_SIZE	(256 * 1024)
-#define DMA_POOL_SIZE	(8 * 1024 * 1024)
+#define DMA_POOL_SIZE	(4 * 1024 * 1024)	/* max order-10 alloc on PPC32/mpc85xx */
 
 /* CMICm offsets from BAR0 (RE: ASIC_INIT_AND_DMA_MAP, SCHAN_AND_RING_BUFFERS) */
 #define CMICM_DMA_CTRL(ch)    (0x31140 + 4 * (ch))
