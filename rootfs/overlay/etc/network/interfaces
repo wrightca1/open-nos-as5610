@@ -11,11 +11,11 @@ auto eth0
 iface eth0 inet dhcp
 
 auto swp1
-iface swp1
+iface swp1 inet static
     address 10.101.101.1/29
     mtu 1600
 
 auto swp2
-iface swp2
+iface swp2 inet static
     address 10.101.101.10/29
     mtu 1600
