@@ -19,7 +19,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 STAGING="${ROOTFS_STAGING:-$SCRIPT_DIR/staging}"
 OUT_DIR="${ROOTFS_OUT_DIR:-$REPO_ROOT/onie-installer}"
 OUT_FILE="${ROOTFS_OUT:-$OUT_DIR/sysroot.squash.xz}"
-KERNEL_VERSION="${KERNEL_VERSION:-5.10.0}"
+KERNEL_VERSION="${KERNEL_VERSION:-5.10.0-dirty}"
 BUILD_ARTIFACTS="${BUILD_ARTIFACTS:-1}"
 
 # Debian jessie archive (EOL; use archive.debian.org)
@@ -164,6 +164,7 @@ if [ "$BUILD_ARTIFACTS" = "1" ]; then
 		for ko in "$REPO_ROOT/bde/nos_kernel_bde.ko" "$REPO_ROOT/bde/nos_user_bde.ko"; do
 			[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/"
 		done
+		depmod -b "$STAGING" "$KERNEL_VERSION" 2>/dev/null || true
 	else
 		log "BUILD_DIR ($BUILD_DIR) has no libbcm56846.so; skipping artifacts."
 	fi
