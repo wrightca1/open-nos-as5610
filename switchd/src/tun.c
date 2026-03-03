@@ -1,4 +1,4 @@
-/* TUN device creation for swp1..swpN */
+/* TAP device creation for swp1..swpN (Ethernet/L2, supports ARP) */
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,7 +19,7 @@ int tun_create(const char *ifname, int *fd_out)
 	if (fd < 0)
 		return -1;
 	memset(&ifr, 0, sizeof(ifr));
-	ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+	ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
 	strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
 	ifr.ifr_name[IFNAMSIZ - 1] = '\0';
 	if (ioctl(fd, TUNSETIFF, &ifr) < 0) {

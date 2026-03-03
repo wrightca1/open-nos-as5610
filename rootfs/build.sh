@@ -161,7 +161,8 @@ if [ "$BUILD_ARTIFACTS" = "1" ]; then
 		[ -f "$BUILD_DIR/switchd/nos-switchd" ] && \
 			cp -f "$BUILD_DIR/switchd/nos-switchd" "$STAGING/usr/sbin/" && \
 			chmod +x "$STAGING/usr/sbin/nos-switchd"
-		for ko in "$REPO_ROOT/bde/nos_kernel_bde.ko" "$REPO_ROOT/bde/nos_user_bde.ko"; do
+		for ko in "$REPO_ROOT/bde/nos_kernel_bde.ko" "$REPO_ROOT/bde/nos_user_bde.ko" \
+		         "$REPO_ROOT/platform/drivers/accton_as5610_cpld.ko"; do
 			[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/"
 		done
 		depmod -b "$STAGING" "$KERNEL_VERSION" 2>/dev/null || true

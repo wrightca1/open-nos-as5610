@@ -10,6 +10,7 @@ set(SDK_SOURCES
   src/attach.c
   src/config.c
   src/soc.c
+  src/init.c
   src/schan.c
   src/reg.c
   src/port.c

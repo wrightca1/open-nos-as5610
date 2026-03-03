@@ -43,7 +43,7 @@
 #define PWM_MAX             248
 
 /* ---- Hardware paths --------------------------------------------------- */
-#define CPLD_BASE       "/sys/devices/ff705000.localbus/ea000000.cpld"
+#define CPLD_BASE       "/sys/devices/platform/ff705000.localbus/ea000000.cpld"
 #define EEPROM_DEV_BASE "/sys/class/eeprom_dev"
 #define HWMON_BASE      "/sys/class/hwmon"
 

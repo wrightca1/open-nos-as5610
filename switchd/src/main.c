@@ -71,7 +71,14 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/* TUN creation for swp1..swpN */
+	/* Enable all ports at init time so the ASIC port enable register is
+	 * written immediately.  The netlink thread will also call port_enable_set
+	 * when ifup brings each interface UP, but doing it here ensures the
+	 * registers are set before any packets can arrive. */
+	for (i = 0; i < num_ports; i++)
+		bcm56846_port_enable_set(unit, i + 1, 1);
+
+	/* TAP creation for swp1..swpN (Ethernet interfaces with MAC + ARP) */
 	{
 		const char *names[MAX_PORTS];
 		for (i = 0; i < num_ports; i++)
@@ -81,7 +88,7 @@ int main(int argc, char **argv)
 			bcm56846_detach(unit);
 			return 1;
 		}
-		fprintf(stderr, "Created %d TUN interfaces (swp1..swp%d)\n", num_ports, num_ports);
+		fprintf(stderr, "Created %d TAP interfaces (swp1..swp%d)\n", num_ports, num_ports);
 	}
 
 	/* RX callback cookie and start RX (callback writes to TUN on ASIC punt) */

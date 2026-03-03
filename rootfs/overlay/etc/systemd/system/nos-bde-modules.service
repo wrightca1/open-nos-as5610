@@ -1,5 +1,5 @@
 [Unit]
-Description=Load NOS BDE kernel modules (BCM56846)
+Description=Load NOS kernel modules (BCM56846 BDE + AS5610 CPLD)
 DefaultDependencies=no
 After=local-fs.target
 
@@ -8,6 +8,7 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/nos_kernel_bde.ko'
 ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/nos_user_bde.ko'
+ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/accton_as5610_cpld.ko || true'
 
 [Install]
 WantedBy=multi-user.target
