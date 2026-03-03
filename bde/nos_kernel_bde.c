@@ -59,10 +59,18 @@
 /* CMIC_CMC0_SCHAN_CTRL bit fields (CMICm spec) */
 #define SCHAN_CTRL_START        (1u << 0)
 #define SCHAN_CTRL_DONE         (1u << 1)
-#define SCHAN_CTRL_ABORT        (1u << 2)   /* write 1 to abort stale op; also ERROR status when set by HW */
+#define SCHAN_CTRL_ABORT        (1u << 2)   /* write 1 to abort stale op; also ERROR_ABORT when set by HW */
+#define SCHAN_CTRL_NACK         (1u << 3)   /* HW sets on SBUS NACK (agent not present, block in reset) */
 #define SCHAN_CTRL_ERR_MASK     ((1u << 2) | (1u << 3))  /* ERROR_ABORT + NACK */
+/*
+ * SCHAN completion mask: exit poll on DONE *or* any error bit.
+ * CMICm sets DONE=1 on success; on SBUS timeout/NACK it may only set
+ * NACK (bit 3) without DONE (bit 1).  Polling only for DONE causes a
+ * full 50ms wait on every failed command.  Exit on any completion signal.
+ */
+#define SCHAN_CTRL_COMPLETE     (SCHAN_CTRL_DONE | SCHAN_CTRL_ERR_MASK)
 
-#define SCHAN_POLL_MS    500
+#define SCHAN_POLL_MS    50   /* 50ms: SBUS_TIMEOUT=2000 cyc (~10us), 50ms >> enough */
 
 struct nos_bde_priv {
 	struct pci_dev *pdev;
@@ -259,14 +267,19 @@ int nos_bde_schan_op(const u32 *cmd, int cmd_words, u32 *data, int data_words, i
 	/* Protocol step 4: assert START to trigger operation */
 	iowrite32(SCHAN_CTRL_START, bar0 + CMIC_CMC0_SCHAN_CTRL);
 
-	/* Poll for done */
+	/* Poll for completion: DONE or any error bit (NACK/ERROR_ABORT).
+	 * CMICm may set NACK without DONE on SBUS timeout (e.g. block in reset).
+	 * Exiting on SCHAN_CTRL_COMPLETE prevents 50ms stall per bad command.
+	 */
 	timeout = jiffies + msecs_to_jiffies(SCHAN_POLL_MS);
 	while (time_before(jiffies, timeout)) {
 		ctrl = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
-		if (ctrl & SCHAN_CTRL_DONE) {
+		if (ctrl & SCHAN_CTRL_COMPLETE) {
 			iowrite32(0, bar0 + CMIC_CMC0_SCHAN_CTRL);
 			if (ctrl & SCHAN_CTRL_ERR_MASK) {
-				pr_warn("nos-bde: SCHAN error ctrl=0x%08x\n", ctrl);
+				pr_warn_ratelimited(
+				    "nos-bde: SCHAN err ctrl=0x%08x cmd[0]=0x%08x addr=0x%08x\n",
+				    ctrl, cmd[0], cmd_words > 1 ? cmd[1] : 0);
 				*status = -EIO;
 			} else {
 				/* Read result back (for read ops) */
@@ -277,10 +290,11 @@ int nos_bde_schan_op(const u32 *cmd, int cmd_words, u32 *data, int data_words, i
 			}
 			return 0;
 		}
-		usleep_range(10, 100);
+		usleep_range(10, 50);
 	}
 	iowrite32(0, bar0 + CMIC_CMC0_SCHAN_CTRL);
-	pr_warn("nos-bde: SCHAN timeout cmd[0]=0x%08x\n", cmd[0]);
+	pr_warn_ratelimited("nos-bde: SCHAN timeout cmd[0]=0x%08x addr=0x%08x ctrl=0x%08x\n",
+			    cmd[0], cmd_words > 1 ? cmd[1] : 0, ctrl);
 	*status = -ETIMEDOUT;
 	return 0;
 }
