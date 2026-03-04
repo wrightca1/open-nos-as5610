@@ -1,6 +1,6 @@
 # open-nos-as5610 — Build and Implementation Status
 
-**Last updated:** 2026-03-01
+**Last updated:** 2026-03-04
 
 ---
 
@@ -16,7 +16,7 @@
 | **Phase 1a DTB/initramfs/FIT** | ✅ In place | initramfs/build.sh, boot/build-fit.sh, real Cumulus DTB (boot/as5610_52x.dtb) |
 | **Rootfs** | ✅ Debian Jessie PPC32 | rootfs/build.sh — jessie from archive.debian.org (last Debian with powerpc); glibc 2.19 + systemd 215 compatible with Linux 5.10 |
 | **ONIE installer .bin** | ✅ Produced | 171MB; all NOS binaries included (nos-switchd, libbcm56846.so, BDE .ko, platform-mgrd); served at http://10.22.1.4:8000/ |
-| **Hardware validation** | ⏳ Pending | Run `onie-nos-install` on AS5610, `bde_validate` on target |
+| **Hardware validation** | 🟡 In progress | SCHAN working; 52 swp TAP interfaces up; XLPORT reset de-assertion pending cold-boot test |
 
 ---
 
@@ -56,6 +56,28 @@
 
 ---
 
+## Hardware Validation Progress (AS5610-52X at 10.1.1.233)
+
+| Step | Status | Notes |
+|------|--------|-------|
+| BDE modules load | ✅ | `nos_kernel_bde.ko` + `nos_user_bde.ko` load cleanly |
+| SCHAN PIO mode | ✅ | Cold power cycle; SCHAN_CTRL=0x00 after 0xFE abort clear |
+| SBUS ring map | ✅ | 0x204..0x220 programmed; ring map reads back 0x43052100/0x33333343 |
+| LINK40G_ENABLE | ✅ | 0x1c CMIC_MISC_CONTROL bit 0 set; required for XLMAC SBUS access |
+| 52 TAP interfaces | ✅ | swp1..swp52 as TUN/TAP; verified via `ip link show` |
+| XLPORT SCHAN reads | ⏳ | ERROR_ABORT — XLPORT blocks in soft reset; awaiting de-assertion |
+| TOP_SOFT_RESET_REG | ⏳ | SCHAN addr 0x28033200 (RE-confirmed); probed on next cold boot |
+| Port link | ⏳ | Pending XLPORT reset de-assertion |
+| L2/L3 forwarding | ⏳ | Pending port bring-up |
+
+**Warm-boot note**: CMC2 remains in DMA ring-buffer mode after warm reboot; PIO SCHAN requires
+cold hardware power cycle (unplug + replug). `init.c` detects this via `CMIC_DMA_RING_ADDR (0x158)`.
+
+**NOS_BDE_WRITE_REG ioctl**: Source uses `_IOR` (not `_IOW`) to match the deployed `.ko` binary
+(discovered via `ENOTTY` on writes; confirmed by disassembly of deployed `nos_user_bde.ko`).
+
+---
+
 ## Known Issues
 
 | Issue | Impact | Status |
@@ -65,6 +87,7 @@
 | SPE toolchain flags removed | `-mabi=spe -mspe -mfloat-gprs=double` not supported by `powerpc-linux-gnu-gcc` 12; only `-mcpu=8548` used | Fixed in `tools/ppc32-toolchain.cmake` |
 | jessie-updates mirror 404 | `archive.debian.org/debian-security` powerpc repo is missing; debootstrap errors on security suite | Non-fatal; security updates not available; production should use Void Linux (see PLAN.md §11.1) |
 | Debian jessie + kernel 5.10 | glibc 2.19 requires kernel ≥3.2; systemd 215 requires ≥3.10 | ✅ Confirmed compatible; Linux 5.10 satisfies both |
+| XLPORT blocks in soft reset | All SCHAN reads to XLPORT/XLMAC return ERROR_ABORT at cold boot | Fix: `bcm56846_xlport_deassert_reset()` in `init.c` probes `TOP_SOFT_RESET_REG` at `0x28033200` |
 
 ---
 
@@ -74,7 +97,7 @@
 - **1a:** [x] Kernel 5.10 PPC32 built. [x] DTB (real Cumulus boot/as5610_52x.dtb). [x] initramfs packed. [x] FIT (nos-powerpc.itb). [ ] Boot on target via ONIE.
 - **1b:** [x] nos-kernel-bde.ko (PCI, BAR0, DMA, S-Channel, exports)
 - **1c:** [x] nos-user-bde.ko (/dev/nos-bde, ioctls, mmap)
-- **1d:** [x] BDE validation test (bde_validate). [ ] Run on target → Passed 3/3
+- **1d:** [x] BDE validation test (bde_validate). [x] Run on target → SCHAN working; XLPORT reset pending
 
 ### Phase 2 — Custom SDK (libbcm56846)
 - **2a:** [x] S-Channel and register access (BDE ioctl)

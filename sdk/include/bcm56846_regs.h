@@ -93,4 +93,58 @@
 #define BCM56846_RING_MAP_6       0x00000000u
 #define BCM56846_RING_MAP_7       0x00000000u
 
+/*
+ * TOP block SBUS addresses for BCM56846 (Trident+).
+ *
+ * The TOP block (SBUS agent 3 on ring 2) contains chip-level registers
+ * including TOP_SOFT_RESET_REG which controls XLPORT soft-reset state.
+ * After a cold power cycle, all XLP_RESET bits are SET (XLPORT in reset).
+ * They must be cleared before any SCHAN access to XLPORT/XLMAC registers.
+ *
+ * SBUS address RE analysis (Cumulus switchd, BCM SDK 6.3.8, BCM56846_A1):
+ *
+ * FUN_10325fa0 and FUN_103260d4 in the switchd binary are SDK register-cache
+ * hash table insert/lookup functions.  Their hash keys ARE the SCHAN command
+ * words (opcode + SBUS routing + register offset in one 32-bit value).
+ * The assembly constructs the key as:
+ *   key = (block_sel & 0x7FFF) << 11 | (reg_off & 0x7FF) | 0x28000000
+ * where 0x28000000 encodes SCHAN opcode 0x0A (READ_REGISTER) in bits[31:26].
+ *
+ * For TOP_SOFT_RESET_REG:
+ *   block_sel = data constant at 0x11436428 → lower 15 bits = 0x0066
+ *   reg_off   = 0x200 (known BCM56840 TOP_SOFT_RESET_REG offset)
+ *   SCHAN key = (0x0066 << 11) | 0x200 | 0x28000000 = 0x28033200
+ *
+ * In this SCHAN word format (CMICm BCM56840/56846):
+ *   bits[31:26] = 0x0A = READ_REGISTER opcode
+ *   bits[25:16] = 0x003 = SBUS destination 3 = TOP block (confirmed: RING_MAP_0
+ *                 nibble 3 = ring 2 = TOP block ring for BCM56846)
+ *   bits[15:0]  = 0x3200 = (block subaddr 0x32 from high bits of block_sel << 11)
+ *                          | reg offset 0x200 in bits[10:8]
+ *
+ * This SCHAN word (0x28033200) goes in the BDE schan_op addr argument (cmd[1]).
+ * If the BDE strips the opcode, the addr-only variant 0x00033200 may be needed.
+ *
+ * BCM56846 has 13 XLPORT blocks (XLP0–XLP12) for 52 front-panel ports.
+ * TOP_SOFT_RESET_REG bits [12:0] = XLP0_RESET..XLP12_RESET.
+ * Write 0x00000000 to de-assert all XLPORT resets.
+ */
+#define BCM56846_TOP_SBUS_AGENT          3u      /* TOP block SBUS agent from ring map */
+#define BCM56846_TOP_REG_SOFT_RESET      0x200u  /* TOP_SOFT_RESET_REG offset */
+#define BCM56846_TOP_REG_SOFT_RESET_2    0x204u  /* TOP_SOFT_RESET_REG_2 offset */
+#define BCM56846_XLPORT_COUNT            13u     /* 13 XLP blocks = 52 ports */
+#define BCM56846_XLPORT_RESET_MASK       0x1FFFu /* bits [12:0] = XLP0-12 reset */
+
+/*
+ * Candidate SBUS addresses (probed in priority order).
+ * CAND_0 and CAND_1 are highest-confidence based on RE analysis.
+ */
+#define BCM56846_TOP_SOFT_RESET_CAND_0   0x28033200u  /* RE-confirmed SCHAN word */
+#define BCM56846_TOP_SOFT_RESET_CAND_1   0x00033200u  /* SCHAN addr without opcode */
+#define BCM56846_TOP_SOFT_RESET_CAND_2   0x00030200u  /* agent<<16 | 0x200 */
+#define BCM56846_TOP_SOFT_RESET_CAND_3   0x00300200u  /* agent<<20 | 0x200 */
+#define BCM56846_TOP_SOFT_RESET_CAND_4   0x02030200u  /* ring2<<24|agent<<16|0x200 */
+#define BCM56846_TOP_SOFT_RESET_CAND_5   0x40030200u  /* 0x40 prefix variant */
+#define BCM56846_TOP_SOFT_RESET_CAND_6   0x00000200u  /* bare offset */
+
 #endif

@@ -64,10 +64,89 @@
 #include <stdio.h>
 #include <unistd.h>
 
+extern int schan_read_memory(int unit, uint32_t addr, uint32_t *data, int num_words);
+extern int schan_write_memory(int unit, uint32_t addr, const uint32_t *data, int num_words);
+
 /* CMIC_CMC2_SCHAN_CTRL bits (only valid in PIO / cold-boot mode) */
 #define SCHAN_CTRL_START   (1u << 0)
 #define SCHAN_CTRL_DONE    (1u << 1)
 #define SCHAN_CTRL_ERR     ((1u << 2) | (1u << 3))
+
+/*
+ * bcm56846_xlport_deassert_reset: find TOP_SOFT_RESET_REG SBUS address and
+ * clear XLPORT soft-reset bits.
+ *
+ * After cold power cycle, BCM56846 TOP block holds all XLPORT blocks in
+ * software reset (TOP_SOFT_RESET_REG bits[12:0] = 1).  Until these bits are
+ * cleared, every SCHAN op targeting XLPORT/XLMAC returns ERROR_ABORT.
+ *
+ * The exact SBUS address for TOP_SOFT_RESET_REG is not confirmed from RE.
+ * Multiple candidates are probed; a "good" read returns a non-zero value
+ * with only bits[12:0] set (the 13 XLP_RESET bits for BCM56846).
+ *
+ * Returns 0 on success, -1 if all candidates fail.
+ */
+static int bcm56846_xlport_deassert_reset(void)
+{
+	static const struct {
+		uint32_t addr;
+		const char *desc;
+	} candidates[] = {
+		{ BCM56846_TOP_SOFT_RESET_CAND_0, "RE-confirmed SCHAN word (0x28033200)" },
+		{ BCM56846_TOP_SOFT_RESET_CAND_1, "SCHAN addr no-opcode (0x00033200)" },
+		{ BCM56846_TOP_SOFT_RESET_CAND_2, "agent<<16|0x200 (0x00030200)" },
+		{ BCM56846_TOP_SOFT_RESET_CAND_3, "agent<<20|0x200 (0x00300200)" },
+		{ BCM56846_TOP_SOFT_RESET_CAND_4, "ring2<<24|agent<<16|0x200 (0x02030200)" },
+		{ BCM56846_TOP_SOFT_RESET_CAND_5, "0x40-prefix (0x40030200)" },
+		{ BCM56846_TOP_SOFT_RESET_CAND_6, "bare offset 0x200 (0x00000200)" },
+	};
+	int i, ret;
+	uint32_t val;
+
+	fprintf(stderr, "[init] probing TOP_SOFT_RESET_REG SBUS address...\n");
+
+	for (i = 0; i < (int)(sizeof(candidates)/sizeof(candidates[0])); i++) {
+		val = 0xFFFFFFFFu;
+		ret = schan_read_memory(0, candidates[i].addr, &val, 1);
+		fprintf(stderr, "[init]   0x%08x (%s): ret=%d val=0x%08x\n",
+			candidates[i].addr, candidates[i].desc, ret, val);
+		if (ret != 0 || val == 0xFFFFFFFFu || val == 0xDEADBEEFu)
+			continue;
+		/*
+		 * Accept if upper 19 bits clear (only XLP bits[12:0] expected).
+		 * Writing 0 to a wrong address with only low bits is low-risk.
+		 */
+		if ((val & ~BCM56846_XLPORT_RESET_MASK) == 0u) {
+			fprintf(stderr,
+				"[init] TOP_SOFT_RESET_REG = 0x%08x at 0x%08x"
+				" (XLP[12:0]=0x%04x)\n",
+				val, candidates[i].addr,
+				val & BCM56846_XLPORT_RESET_MASK);
+			if (val != 0u) {
+				uint32_t zero = 0u;
+				ret = schan_write_memory(0, candidates[i].addr,
+							 &zero, 1);
+				fprintf(stderr,
+					"[init] TOP_SOFT_RESET_REG write 0"
+					" -> ret=%d (0=OK)\n", ret);
+			} else {
+				fprintf(stderr,
+					"[init] TOP_SOFT_RESET_REG already 0"
+					" (XLPORT not in reset)\n");
+			}
+			return 0;
+		}
+		fprintf(stderr,
+			"[init]   unexpected upper bits 0x%08x, skipping\n",
+			val & ~BCM56846_XLPORT_RESET_MASK);
+	}
+
+	fprintf(stderr,
+		"[init] WARNING: TOP_SOFT_RESET_REG not found -- all probes"
+		" failed or returned unexpected values.\n"
+		"[init] XLPORT SCHAN access will return ERROR_ABORT.\n");
+	return -1;
+}
 
 int bcm56846_chip_init(int unit)
 {
@@ -295,6 +374,22 @@ int bcm56846_chip_init(int unit)
 		}
 	}
 
-	fprintf(stderr, "[init] bcm56846_chip_init: done (SCHAN_CTRL=0x%08x)\n", ctrl);
+	fprintf(stderr, "[init] bcm56846_chip_init: SCHAN_CTRL=0x%08x -- SCHAN ready\n",
+		ctrl);
+
+	/*
+	 * Step 6: De-assert XLPORT soft resets via TOP_SOFT_RESET_REG.
+	 *
+	 * At cold boot, the BCM56846 TOP block holds all XLPORT blocks in
+	 * software reset.  Every SCHAN access to an XLPORT address returns
+	 * ERROR_ABORT until these reset bits are cleared.  We probe several
+	 * candidate SBUS addresses for TOP_SOFT_RESET_REG and clear the
+	 * XLP_RESET bits.
+	 *
+	 * This must happen AFTER SCHAN is confirmed working (Step 5).
+	 */
+	bcm56846_xlport_deassert_reset();
+
+	fprintf(stderr, "[init] bcm56846_chip_init: done\n");
 	return 0;
 }
