@@ -9,6 +9,7 @@
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
+#include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/delay.h>
@@ -35,22 +36,44 @@
  * The switchd binary contains 4 MSG sets (0x3100c/CMC0, 0x3200c/CMC1,
  * 0x3300c/CMC2, 0x1000c/alias).  libopennsl uses the 0x3300c set = CMC2.
  *
- * IMPORTANT — WHY SCHAN IS CURRENTLY NON-FUNCTIONAL:
- *   After warm reboot from Cumulus, the BCM56846 CMC2 is still in
- *   SCHAN ring-buffer DMA mode (configured by the Cumulus BCM SDK).
- *   In ring-buffer mode, direct PIO writes to SCHAN_CTRL (0x33000) are
- *   non-writable from PCIe — the CMIC hardware controls 0x33000 internally.
- *   The other CMC addresses (0x31000, 0x32000, 0x32800) ARE writable from
- *   PCIe but are not the active SCHAN CMC, so writing START has no effect.
+ * COLD-BOOT SCHAN STATE (confirmed experimentally 2026-01-19):
+ *   After a hard power cycle the BCM56846 CMICm comes up in PIO mode.
+ *   Cold-boot indicators: BAR0+0x158 (DMA_RING_ADDR) = 0x00000000,
+ *   BAR0+0x148 (DMA_CFG) = 0x00000000.
  *
- *   Fix: perform a cold power-cycle of the switch so the BCM56846 resets
- *   to its factory default (PIO mode).  After a cold boot, SCHAN_CTRL at
- *   0x33000 will accept writes and PIO operations will complete normally.
- *   Ring maps and SBUS_TIMEOUT must be re-programmed on each cold boot.
+ *   After bcm56846_chip_init() programs SBUS_TIMEOUT (0x200) and SBUS ring
+ *   maps (0x204-0x220), SCHAN PIO operations complete successfully:
+ *     - SCHAN ops return ctrl=0x00000002 (DONE, no error) for accessible regs
+ *     - SCHAN ops return ctrl=0x00000004 (ERROR_ABORT = SBUS timeout) for
+ *       uninitialized/reset blocks (e.g. XMAC/XLMAC before port enable).
+ *       This is expected and not a SCHAN protocol failure.
+ *     - SCHAN_CTRL (0x33000) is writable and responds to START/ABORT.
  *
- *   Alternative (not yet implemented): implement SCHAN ring-buffer DMA mode
- *   in nos_bde_schan_op() so we can use the existing Cumulus-era CMIC config
- *   without a cold power cycle.
+ *   IMPORTANT — CONCURRENT ACCESS:
+ *   nos_bde_schan_op() is serialized by schan_mutex.  Without the mutex,
+ *   concurrent callers (e.g. nos-switchd link_state_thread + user tests)
+ *   corrupt each other's MSG register writes and CTRL polls, causing spurious
+ *   ETIMEDOUT returns.
+ *
+ * WARM-BOOT (soft reboot from Cumulus) — NON-FUNCTIONAL:
+ *   After warm reboot from Cumulus, the BCM56846 CMICm remains in
+ *   SCHAN ring-buffer DMA mode (Cumulus driver configures this; state
+ *   persists through warm reset).
+ *
+ *   In this state ALL BAR0 MMIO writes are SILENTLY IGNORED by hardware.
+ *   Warm-boot indicators: BAR0+0x158 (DMA_RING_ADDR) = 0x0294ffd0 (Cumulus
+ *   ring buffer PA), BAR0+0x148 = 0x80000000 (DMA mode enable).
+ *
+ *   PCI reset methods DO NOT help:
+ *     - FLR (Function Level Reset): NOT supported by BCM56846
+ *       (Device Capabilities register bit 28 = 0)
+ *     - PCIe secondary bus reset via bridge: causes momentary link loss
+ *       but CMIC internal state is NOT cleared (ring maps persist).
+ *
+ *   Fix: cold power-cycle the switch.
+ *
+ * TODO: add warm-boot detection in nos_bde_probe():
+ *   if (readl(bar0 + 0x158) != 0) warn that cold power-cycle is required.
  */
 #define CMIC_CMC0_SCHAN_CTRL  0x33000
 #define CMIC_CMC0_SCHAN_MSG(n)  (0x3300c + (n) * 4)
@@ -82,6 +105,13 @@ struct nos_bde_priv {
 };
 
 static struct nos_bde_priv *bde_priv;
+
+/*
+ * Serialize all S-Channel PIO operations.  Without this, concurrent callers
+ * (e.g. nos-switchd link_state_thread + any other SCHAN user) corrupt each
+ * other's MSG register writes and CTRL polls, causing spurious ETIMEDOUT.
+ */
+static DEFINE_MUTEX(schan_mutex);
 
 static irqreturn_t nos_bde_irq(int irq, void *dev_id)
 {
@@ -218,7 +248,7 @@ int nos_bde_schan_op(const u32 *cmd, int cmd_words, u32 *data, int data_words, i
 {
 	struct nos_bde_priv *p = bde_priv;
 	void __iomem *bar0;
-	int i, total;
+	int i, total, ret;
 	unsigned long timeout;
 	u32 ctrl;
 
@@ -229,20 +259,34 @@ int nos_bde_schan_op(const u32 *cmd, int cmd_words, u32 *data, int data_words, i
 	if (total > SCHAN_MAX_MSG_WORDS)
 		return -EINVAL;
 
+	if (mutex_lock_interruptible(&schan_mutex))
+		return -EINTR;
+
 	bar0 = p->bar0;
 	*status = -1;
+	ret = 0;
 
 	/*
-	 * Clear any stale SCHAN state. If CTRL is non-zero (DONE or START stuck
-	 * from prior op / warm reboot), use ABORT to force-clear, then write 0.
-	 * Per SCHAN_AND_RING_BUFFERS.md: protocol requires "write 0 → SCHAN_CTRL
-	 * [clear any stale state]" before "write START".
+	 * Clear any stale SCHAN state before issuing a new operation.
+	 *
+	 * CMICm SCHAN_CTRL error/status bits are W1C (write-1-to-clear); writing
+	 * 0 has no effect.  The ABORT bit (bit 2) triggers an in-flight op
+	 * abort when asserted by the host.
+	 *
+	 * If stale state is present, write 0xFE (bits 1-7, all except START=0):
+	 *   bit 2 (ABORT):   trigger abort of any pending SCHAN op.
+	 *   bits 1,3-7:      W1C clears DONE and all error/status flags.
+	 *
+	 * Do NOT use "ctrl | SCHAN_CTRL_ABORT" — if bit 2 is already 1 in ctrl
+	 * (hardware-set ERROR state, e.g. cold-boot 0x65), OR-ing adds nothing
+	 * and the abort is never re-triggered.  Writing a fixed 0xFE always
+	 * freshly asserts ABORT regardless of the current ctrl value.
 	 */
 	ctrl = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
 	if (ctrl != 0) {
 		unsigned long abort_timeout = jiffies + msecs_to_jiffies(20);
 
-		iowrite32(ctrl | SCHAN_CTRL_ABORT, bar0 + CMIC_CMC0_SCHAN_CTRL);
+		iowrite32(0xFEu, bar0 + CMIC_CMC0_SCHAN_CTRL);
 		while (time_before(jiffies, abort_timeout)) {
 			ctrl = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
 			if (ctrl == 0)
@@ -288,7 +332,7 @@ int nos_bde_schan_op(const u32 *cmd, int cmd_words, u32 *data, int data_words, i
 						data[i] = ioread32(bar0 + CMIC_CMC0_SCHAN_MSG(i));
 				*status = 0;
 			}
-			return 0;
+			goto out;
 		}
 		usleep_range(10, 50);
 	}
@@ -296,7 +340,9 @@ int nos_bde_schan_op(const u32 *cmd, int cmd_words, u32 *data, int data_words, i
 	pr_warn_ratelimited("nos-bde: SCHAN timeout cmd[0]=0x%08x addr=0x%08x ctrl=0x%08x\n",
 			    cmd[0], cmd_words > 1 ? cmd[1] : 0, ctrl);
 	*status = -ETIMEDOUT;
-	return 0;
+out:
+	mutex_unlock(&schan_mutex);
+	return ret;
 }
 EXPORT_SYMBOL(nos_bde_schan_op);
 

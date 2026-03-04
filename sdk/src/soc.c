@@ -9,7 +9,7 @@
  *   attach *                — no-op (SDK-specific unit attach)
  *   0:                      — no-op (unit selection prefix)
  *   debug -FLAG             — no-op (SDK debug flags)
- *   m REGNAME FIELD=VAL     — no-op (named register field modify)
+ *   m REGNAME FIELD=VAL     — read-modify-write named register field
  *   s REGNAME FIELD=VAL     — no-op (named register field set)
  *   setenv NAME VALUE       — no-op (SDK environment variable)
  *   modreg REGNAME FIELD=V  — no-op (alternate field modify syntax)
@@ -36,6 +36,24 @@ extern int bcm56846_chip_init(int unit);
 struct reg_entry {
 	const char *name;
 	uint32_t    addr;
+};
+
+/* Named register field table for 'm' (read-modify-write) command.
+ * {register_name, field_name, bit_shift, field_mask_unshifted}
+ * All names lowercase — lookup normalises both sides before compare.
+ */
+struct field_entry {
+	const char *reg_name;
+	const char *field_name;
+	uint8_t     shift;
+	uint32_t    mask;
+};
+
+static const struct field_entry field_table[] = {
+	/* CMIC_MISC_CONTROL (BAR0+0x1c) */
+	{ "cmic_misc_control", "link40g_enable",  0u, 0x1u },
+	/* Sentinel */
+	{ NULL, NULL, 0u, 0u }
 };
 
 static const struct reg_entry reg_table[] = {
@@ -120,12 +138,11 @@ static int soc_run_internal(const char *script_path)
 		if (nargs < 1)
 			continue;
 
-		/* debug / attach / setenv / modreg / m / s — silently ignore */
+		/* debug / attach / setenv / modreg / s — silently ignore */
 		if (strcmp(cmd, "debug") == 0 ||
 		    strcmp(cmd, "attach") == 0 ||
 		    strcmp(cmd, "setenv") == 0 ||
 		    strcmp(cmd, "modreg") == 0 ||
-		    strcmp(cmd, "m") == 0 ||
 		    strcmp(cmd, "s") == 0)
 			continue;
 
@@ -169,6 +186,65 @@ static int soc_run_internal(const char *script_path)
 			addr = 0;
 			if (sscanf(arg1, "0x%x", &addr) == 1 || sscanf(arg1, "%u", &addr) == 1) {
 				bde_read_reg((uint32_t)addr, &read_val);
+			}
+			continue;
+		}
+
+		if (strcmp(cmd, "m") == 0 && nargs >= 3) {
+			/* m REGNAME FIELD=VALUE — read-modify-write named register field */
+			uint32_t reg_addr = reg_lookup(arg1);
+			char field_name[64] = {0};
+			unsigned long field_val = 0;
+			char lower_reg[64], lower_field[64];
+			size_t fi;
+			const struct field_entry *fe;
+
+			if (reg_addr == 0u) {
+				fprintf(stderr, "[soc] m: unknown register '%s' (skipping)\n",
+					arg1);
+				continue;
+			}
+
+			/* Parse FIELD=VALUE — try hex prefix then decimal */
+			if (sscanf(arg2, "%63[^=]=0x%lx", field_name, &field_val) != 2 &&
+			    sscanf(arg2, "%63[^=]=0X%lx", field_name, &field_val) != 2 &&
+			    sscanf(arg2, "%63[^=]=%lu",   field_name, &field_val) != 2) {
+				fprintf(stderr, "[soc] m: bad FIELD=VALUE '%s' (skipping)\n",
+					arg2);
+				continue;
+			}
+
+			/* Normalise register and field names to lowercase for lookup */
+			for (fi = 0; fi < sizeof(lower_reg) - 1 && arg1[fi]; fi++)
+				lower_reg[fi] = (char)tolower((unsigned char)arg1[fi]);
+			lower_reg[fi] = '\0';
+			for (fi = 0; fi < sizeof(lower_field) - 1 && field_name[fi]; fi++)
+				lower_field[fi] = (char)tolower((unsigned char)field_name[fi]);
+			lower_field[fi] = '\0';
+
+			/* Look up field definition */
+			for (fe = field_table; fe->reg_name; fe++) {
+				if (strcmp(lower_reg, fe->reg_name) == 0 &&
+				    strcmp(lower_field, fe->field_name) == 0)
+					break;
+			}
+			if (!fe->reg_name) {
+				fprintf(stderr,
+					"[soc] m: unknown field '%s.%s' (skipping)\n",
+					arg1, field_name);
+				continue;
+			}
+
+			/* Read-modify-write */
+			{
+				uint32_t cur = 0u;
+				bde_read_reg(reg_addr, &cur);
+				cur = (cur & ~(fe->mask << fe->shift)) |
+				      ((uint32_t)(field_val & fe->mask) << fe->shift);
+				bde_write_reg(reg_addr, cur);
+				fprintf(stderr,
+					"[soc] m %s.%s=%lu -> 0x%08x\n",
+					arg1, field_name, field_val, cur);
 			}
 			continue;
 		}

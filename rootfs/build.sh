@@ -165,6 +165,29 @@ if [ "$BUILD_ARTIFACTS" = "1" ]; then
 		         "$REPO_ROOT/platform/drivers/accton_as5610_cpld.ko"; do
 			[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/"
 		done
+		# Install MTD/CFI modules for U-Boot env access (boot_count reset via fw_setenv)
+		if [ -n "$KERNEL_SRC" ] && [ -d "$KERNEL_SRC/drivers/mtd" ]; then
+			log "Installing MTD/CFI kernel modules..."
+			mkdir -p "$STAGING/lib/modules/$KERNEL_VERSION/kernel/drivers/mtd/chips"
+			mkdir -p "$STAGING/lib/modules/$KERNEL_VERSION/kernel/drivers/mtd/maps"
+			mkdir -p "$STAGING/lib/modules/$KERNEL_VERSION/kernel/drivers/mtd/parsers"
+			for ko in \
+				"$KERNEL_SRC/drivers/mtd/mtd.ko" \
+				"$KERNEL_SRC/drivers/mtd/chips/chipreg.ko" \
+				"$KERNEL_SRC/drivers/mtd/chips/gen_probe.ko" \
+				"$KERNEL_SRC/drivers/mtd/chips/cfi_util.ko" \
+				"$KERNEL_SRC/drivers/mtd/chips/cfi_probe.ko" \
+				"$KERNEL_SRC/drivers/mtd/chips/cfi_cmdset_0002.ko" \
+				"$KERNEL_SRC/drivers/mtd/chips/cfi_cmdset_0001.ko"; do
+				[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/kernel/drivers/mtd/chips/"
+			done
+			for ko in "$KERNEL_SRC/drivers/mtd/maps/physmap.ko"; do
+				[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/kernel/drivers/mtd/maps/"
+			done
+			for ko in "$KERNEL_SRC/drivers/mtd/parsers/ofpart.ko"; do
+				[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/kernel/drivers/mtd/parsers/"
+			done
+		fi
 		depmod -b "$STAGING" "$KERNEL_VERSION" 2>/dev/null || true
 		chroot "$STAGING" ldconfig 2>/dev/null || true
 	else

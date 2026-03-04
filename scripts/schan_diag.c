@@ -164,6 +164,8 @@ int main(void)
 	schan_ioctl(0x1c000001, 0x02000000, "opcode=0x07(MEM_READ)  addr=0x2000000");
 	schan_ioctl(0x2c000001, 0x00000000, "opcode=0x0b(REG_READ)  addr=0");
 	schan_ioctl(0x2c000001, 0x02000000, "opcode=0x0b(REG_READ)  addr=0x2000000");
+	/* XLMAC/XLPORT LINK40G_ENABLE test: DONE=access OK, ERROR=blocked */
+	schan_ioctl(0x2c000001, 0x40a0082cu, "opcode=0x0b(REG_READ)  XMAC_TX_CTRL port0");
 	printf("\n");
 
 	/* ---- 5. Raw CMC0 tests (bypass ioctl) ---- */

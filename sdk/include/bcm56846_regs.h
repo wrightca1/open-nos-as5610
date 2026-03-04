@@ -27,8 +27,29 @@
 #define CMICM_DMA_HALT_ADDR(ch)   (0x31120u + 4u * (ch))
 #define CMICM_DMA_STAT            0x31150u
 
+/*
+ * Cold-boot detection.
+ * BAR0+0x158 holds the host physical address of the Cumulus SCHAN DMA ring
+ * buffer after warm reboot (e.g. 0x0294ffd0).  Zero after a true hardware
+ * power cycle.  Read this before touching SCHAN_CTRL: if non-zero, CMC2 is
+ * in DMA ring-buffer mode and PIO SCHAN will not work until a cold power cycle.
+ *
+ * NOTE: A previous version of this header incorrectly named this CMIC_MIIM_PARAM.
+ * MIIM_PARAM is at a different offset (likely 0x0230); 0x158 is the DMA ring addr.
+ */
+#define CMIC_DMA_RING_ADDR        0x0158u   /* Non-zero = warm boot, DMA mode active */
+
+/*
+ * CMIC_MISC_CONTROL (BAR0+0x1c).
+ * Bit 0 = LINK40G_ENABLE: gates SBUS access to 40G (XLMAC) port blocks.
+ * Cumulus rc.soc sets this via 'm cmic_misc_control LINK40G_ENABLE=1'.
+ * Without it, all SCHAN ops to XLPORT/XLMAC addresses return ERROR_ABORT.
+ */
+#define CMIC_MISC_CONTROL         0x001cu
+#define CMIC_MISC_CONTROL_LINK40G_ENABLE  (1u << 0)
+
 /* MIIM (MDIO) for SerDes */
-#define CMIC_MIIM_PARAM           0x00000158u
+#define CMIC_MIIM_PARAM           0x00000230u   /* MDIO data/command parameter */
 #define CMIC_MIIM_ADDRESS         0x000004a0u
 
 /*
