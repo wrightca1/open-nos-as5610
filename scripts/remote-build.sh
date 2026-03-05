@@ -147,6 +147,24 @@ elif [ "$BUILD_KERNEL" = "1" ]; then
         -e CONFIG_SENSORS_LM90 \
         -e CONFIG_EEPROM_AT24 \
         2>/dev/null || true
+    # MTD/CFI: SPI NOR / LBC CFI flash on P2020 (required for /proc/mtd and fw_setenv
+    # boot_count reset; without this the ONIE boot loop cannot be prevented).
+    # AS5610-52X flash is memory-mapped via P2020 LBC → physmap-of + CFI probe.
+    ./scripts/config \
+        -m CONFIG_MTD \
+        -e CONFIG_MTD_MAP_BANK_WIDTH_1 \
+        -e CONFIG_MTD_MAP_BANK_WIDTH_2 \
+        -e CONFIG_MTD_MAP_BANK_WIDTH_4 \
+        -m CONFIG_MTD_CFI \
+        -m CONFIG_MTD_CFI_AMDSTD \
+        -m CONFIG_MTD_CFI_INTELEXT \
+        -m CONFIG_MTD_CFI_UTIL \
+        -m CONFIG_MTD_JEDECPROBE \
+        -m CONFIG_MTD_PHYSMAP \
+        -m CONFIG_MTD_PHYSMAP_OF \
+        -m CONFIG_MTD_OF_PARTS \
+        -m CONFIG_MTD_CMDLINE_PARTS \
+        2>/dev/null || true
 
     # Apply AS5610-52X machine description (fixes "No suitable machine description found")
     # The DTB compatible "accton,as5610_52x" has no match in mainline Linux 5.10.

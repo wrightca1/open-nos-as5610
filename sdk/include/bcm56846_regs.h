@@ -28,16 +28,28 @@
 #define CMICM_DMA_STAT            0x31150u
 
 /*
- * Cold-boot detection.
- * BAR0+0x158 holds the host physical address of the Cumulus SCHAN DMA ring
- * buffer after warm reboot (e.g. 0x0294ffd0).  Zero after a true hardware
- * power cycle.  Read this before touching SCHAN_CTRL: if non-zero, CMC2 is
- * in DMA ring-buffer mode and PIO SCHAN will not work until a cold power cycle.
+ * Cold-boot detection registers.
  *
- * NOTE: A previous version of this header incorrectly named this CMIC_MIIM_PARAM.
- * MIIM_PARAM is at a different offset (likely 0x0230); 0x158 is the DMA ring addr.
+ * CMIC_DMA_CFG (BAR0+0x148):
+ *   Reads 0x80000000 as the BCM56846 hardware power-on default.
+ *   Function of bit31 is not fully decoded, but hardware tests (2026-03-04)
+ *   confirm: writing 0 to this register DISABLES SCHAN PIO entirely.
+ *   DO NOT write to this register.  Read for diagnostic display only.
+ *   The name "DMA_CFG" is tentative; it may be a SCHAN PIO enable register.
+ *
+ * CMIC_DMA_RING_ADDR (BAR0+0x158):
+ *   Cumulus writes the host physical address of the CMC2 SCHAN DMA ring
+ *   descriptor buffer here when DMA ring mode is activated (warm reboot).
+ *   Non-zero = warm boot (Cumulus DMA mode active); PIO SCHAN via BDE ioctl
+ *   is unavailable until cold power cycle.
+ *   Zero = cold boot; SCHAN PIO via nos_kernel_bde.ko BDE ioctl is available.
+ *
+ * NOTE: A previous version of this header incorrectly named DMA_RING_ADDR as
+ * CMIC_MIIM_PARAM.  MIIM_PARAM is at a different offset (0x0230).
  */
-#define CMIC_DMA_RING_ADDR        0x0158u   /* Non-zero = warm boot, DMA mode active */
+#define CMIC_DMA_CFG              0x0148u   /* DO NOT WRITE (HW default 0x80000000) */
+#define CMIC_DMA_CFG_ENABLE       (1u << 31) /* tentative; writing 0 breaks SCHAN */
+#define CMIC_DMA_RING_ADDR        0x0158u   /* Non-zero = warm boot, DMA mode */
 
 /*
  * CMIC_MISC_CONTROL (BAR0+0x1c).

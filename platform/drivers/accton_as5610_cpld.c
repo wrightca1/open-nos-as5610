@@ -49,17 +49,35 @@
 /* Fan/system status bits */
 #define FAN_PRESENT_MASK	0x04	/* active LOW: 0 = present */
 #define FAN_FAILURE_MASK	0x08	/* active HIGH: 1 = failure */
+#define FAN_AIR_FLOW_MASK	0x10	/* 0 = front-to-back, 1 = back-to-front */
 
-/* Fan speed register values */
-#define FAN_SPEED_MIN		0x0C	/* 40% */
-#define FAN_SPEED_MID		0x15	/* 70% */
-#define FAN_SPEED_MAX		0x1F	/* 100% */
+/*
+ * Fan speed register (reg 0x0D): 5-bit raw value 0x00-0x1F.
+ * Cumulus/ONLP use a 0-248 scale where pwm_val = raw * 8.
+ * Typical operating points: 0x0C (12→96) = 40%, 0x15 (21→168) = 70%,
+ * 0x1F (31→248) = 100%.  We expose the 0-248 scale to userspace.
+ */
+#define FAN_SPEED_RAW_MAX	0x1F	/* 5-bit max (31) */
+#define FAN_PWM_SCALE		8	/* pwm_val = raw * 8; max = 248 */
+#define FAN_PWM_MAX		248
 
-/* LED register bits (reg 0x13) */
-#define LED_DIAG_MASK		0x30
+/* LED register bits (reg 0x13) — 2-bit field per LED: 00=off, 01=amber, 10=green */
+#define LED_PSU1_MASK		0x03	/* bits[1:0] */
+#define LED_PSU1_OFF		0x00
+#define LED_PSU1_AMBER		0x01
+#define LED_PSU1_GREEN		0x02
+#define LED_PSU2_MASK		0x0C	/* bits[3:2] */
+#define LED_PSU2_OFF		0x00
+#define LED_PSU2_AMBER		0x04
+#define LED_PSU2_GREEN		0x08
+#define LED_DIAG_MASK		0x30	/* bits[5:4] */
 #define LED_DIAG_OFF		0x00
 #define LED_DIAG_AMBER		0x10
 #define LED_DIAG_GREEN		0x20
+#define LED_FAN_MASK		0xC0	/* bits[7:6] */
+#define LED_FAN_OFF		0x00
+#define LED_FAN_AMBER		0x40
+#define LED_FAN_GREEN		0x80
 
 struct as5610_cpld {
 	void __iomem	*base;
@@ -78,46 +96,30 @@ static inline void cpld_wr(struct as5610_cpld *cpld, u8 reg, u8 val)
 
 /* ---- Fan PWM ----------------------------------------------------------- */
 
-static int fan_speed_to_pct(u8 reg_val)
-{
-	reg_val &= 0x1F;
-	if (reg_val >= FAN_SPEED_MAX)
-		return 100;
-	if (reg_val >= FAN_SPEED_MID)
-		return 70;
-	if (reg_val >= FAN_SPEED_MIN)
-		return 40;
-	return 0;
-}
-
-static u8 pct_to_fan_speed(int pct)
-{
-	if (pct >= 100)
-		return FAN_SPEED_MAX;
-	if (pct >= 70)
-		return FAN_SPEED_MID;
-	if (pct >= 40)
-		return FAN_SPEED_MIN;
-	return 0;
-}
-
+/*
+ * pwm1 uses the 0-248 Cumulus/ONLP scale (raw_reg * 8).
+ * platform-mgrd writes: 64 (low), 128 (med), 200 (high), 248 (max).
+ * These map to raw CPLD values: 8, 16, 25, 31.
+ */
 static ssize_t pwm1_show(struct device *dev, struct device_attribute *attr,
 			 char *buf)
 {
 	struct as5610_cpld *cpld = dev_get_drvdata(dev);
-	return sprintf(buf, "%d\n", fan_speed_to_pct(cpld_rd(cpld, CPLD_REG_FAN_SPEED)));
+	u8 raw = cpld_rd(cpld, CPLD_REG_FAN_SPEED) & FAN_SPEED_RAW_MAX;
+
+	return sprintf(buf, "%d\n", (int)raw * FAN_PWM_SCALE);
 }
 
 static ssize_t pwm1_store(struct device *dev, struct device_attribute *attr,
 			  const char *buf, size_t count)
 {
 	struct as5610_cpld *cpld = dev_get_drvdata(dev);
-	long pct;
+	long val;
 
-	if (kstrtol(buf, 10, &pct))
+	if (kstrtol(buf, 10, &val))
 		return -EINVAL;
-	pct = clamp_val(pct, 0, 100);
-	cpld_wr(cpld, CPLD_REG_FAN_SPEED, pct_to_fan_speed((int)pct));
+	val = clamp_val(val, 0, FAN_PWM_MAX);
+	cpld_wr(cpld, CPLD_REG_FAN_SPEED, (u8)(val / FAN_PWM_SCALE));
 	return count;
 }
 
@@ -173,6 +175,16 @@ static ssize_t system_fan_present_show(struct device *dev,
 		       !(cpld_rd(cpld, CPLD_REG_SYS_STATUS) & FAN_PRESENT_MASK));
 }
 
+static ssize_t system_fan_air_flow_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	struct as5610_cpld *cpld = dev_get_drvdata(dev);
+	u8 val = cpld_rd(cpld, CPLD_REG_SYS_STATUS);
+
+	return sprintf(buf, "%s\n",
+		       (val & FAN_AIR_FLOW_MASK) ? "back-to-front" : "front-to-back");
+}
+
 /* ---- LED --------------------------------------------------------------- */
 
 static ssize_t led_diag_show(struct device *dev, struct device_attribute *attr,
@@ -201,6 +213,75 @@ static ssize_t led_diag_store(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
+/* ---- PSU LEDs (reg 0x13 bits[1:0] and [3:2]) -------------------------- */
+
+static ssize_t led_psu_show(struct device *dev, u8 mask, u8 green, u8 amber,
+			    char *buf)
+{
+	struct as5610_cpld *cpld = dev_get_drvdata(dev);
+	u8 val = cpld_rd(cpld, CPLD_REG_LED) & mask;
+
+	const char *s = (val == green) ? "green" :
+			(val == amber) ? "amber" : "off";
+	return sprintf(buf, "%s\n", s);
+}
+
+static ssize_t led_psu_store(struct device *dev, u8 mask, u8 green, u8 amber,
+			     const char *buf, size_t count)
+{
+	struct as5610_cpld *cpld = dev_get_drvdata(dev);
+	u8 val = cpld_rd(cpld, CPLD_REG_LED) & ~mask;
+
+	if (sysfs_streq(buf, "green"))
+		val |= green;
+	else if (sysfs_streq(buf, "amber"))
+		val |= amber;
+
+	cpld_wr(cpld, CPLD_REG_LED, val);
+	return count;
+}
+
+static ssize_t led_psu1_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	return led_psu_show(dev, LED_PSU1_MASK, LED_PSU1_GREEN, LED_PSU1_AMBER, buf);
+}
+
+static ssize_t led_psu1_store(struct device *dev, struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	return led_psu_store(dev, LED_PSU1_MASK, LED_PSU1_GREEN, LED_PSU1_AMBER,
+			     buf, count);
+}
+
+static ssize_t led_psu2_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	return led_psu_show(dev, LED_PSU2_MASK, LED_PSU2_GREEN, LED_PSU2_AMBER, buf);
+}
+
+static ssize_t led_psu2_store(struct device *dev, struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	return led_psu_store(dev, LED_PSU2_MASK, LED_PSU2_GREEN, LED_PSU2_AMBER,
+			     buf, count);
+}
+
+/* ---- Fan LED (reg 0x13 bits[7:6]) ------------------------------------- */
+
+static ssize_t led_fan_show(struct device *dev, struct device_attribute *attr,
+			    char *buf)
+{
+	return led_psu_show(dev, LED_FAN_MASK, LED_FAN_GREEN, LED_FAN_AMBER, buf);
+}
+
+static ssize_t led_fan_store(struct device *dev, struct device_attribute *attr,
+			     const char *buf, size_t count)
+{
+	return led_psu_store(dev, LED_FAN_MASK, LED_FAN_GREEN, LED_FAN_AMBER,
+			     buf, count);
+}
+
 /* ---- Watchdog keepalive ------------------------------------------------ */
 
 static ssize_t watch_dog_keep_alive_store(struct device *dev,
@@ -226,7 +307,11 @@ static DEVICE_ATTR_RO(psu_pwr2_present);
 static DEVICE_ATTR_RO(psu_pwr2_all_ok);
 static DEVICE_ATTR_RO(system_fan_ok);
 static DEVICE_ATTR_RO(system_fan_present);
+static DEVICE_ATTR_RO(system_fan_air_flow);
 static DEVICE_ATTR_RW(led_diag);
+static DEVICE_ATTR_RW(led_psu1);
+static DEVICE_ATTR_RW(led_psu2);
+static DEVICE_ATTR_RW(led_fan);
 static DEVICE_ATTR_WO(watch_dog_keep_alive);
 
 static struct attribute *cpld_attrs[] = {
@@ -237,7 +322,11 @@ static struct attribute *cpld_attrs[] = {
 	&dev_attr_psu_pwr2_all_ok.attr,
 	&dev_attr_system_fan_ok.attr,
 	&dev_attr_system_fan_present.attr,
+	&dev_attr_system_fan_air_flow.attr,
 	&dev_attr_led_diag.attr,
+	&dev_attr_led_psu1.attr,
+	&dev_attr_led_psu2.attr,
+	&dev_attr_led_fan.attr,
 	&dev_attr_watch_dog_keep_alive.attr,
 	NULL
 };

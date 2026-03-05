@@ -36,18 +36,21 @@
  * The switchd binary contains 4 MSG sets (0x3100c/CMC0, 0x3200c/CMC1,
  * 0x3300c/CMC2, 0x1000c/alias).  libopennsl uses the 0x3300c set = CMC2.
  *
- * COLD-BOOT SCHAN STATE (confirmed experimentally 2026-01-19):
+ * COLD-BOOT SCHAN STATE (confirmed experimentally):
  *   After a hard power cycle the BCM56846 CMICm comes up in PIO mode.
- *   Cold-boot indicators: BAR0+0x158 (DMA_RING_ADDR) = 0x00000000,
- *   BAR0+0x148 (DMA_CFG) = 0x00000000.
+ *   Cold-boot indicator: BAR0+0x158 (DMA_RING_ADDR) = 0x00000000.
+ *   BAR0+0x148 reads 0x80000000 as the HARDWARE POWER-ON DEFAULT.
+ *
+ *   IMPORTANT: DO NOT write 0 to BAR0+0x148.  Hardware test 2026-03-04
+ *   confirmed: writing 0 to BAR0+0x148 disables SCHAN PIO entirely.
+ *   Its bit31 function is unknown but must remain set for SCHAN to work.
  *
  *   After bcm56846_chip_init() programs SBUS_TIMEOUT (0x200) and SBUS ring
- *   maps (0x204-0x220), SCHAN PIO operations complete successfully:
- *     - SCHAN ops return ctrl=0x00000002 (DONE, no error) for accessible regs
- *     - SCHAN ops return ctrl=0x00000004 (ERROR_ABORT = SBUS timeout) for
- *       uninitialized/reset blocks (e.g. XMAC/XLMAC before port enable).
- *       This is expected and not a SCHAN protocol failure.
- *     - SCHAN_CTRL (0x33000) is writable and responds to START/ABORT.
+ *   maps (0x204-0x220), SCHAN PIO operations complete via BDE ioctl:
+ *     - SCHAN ops to TOP/accessible regs: ctrl=0x00000002 (DONE, no error)
+ *     - SCHAN ops to XLPORT (in soft reset): ctrl=0x00000077 (ABORT+NACK)
+ *       This is the expected ERROR_ABORT response from blocks in reset.
+ *     - SCHAN_CTRL (0x33000) responds to START/ABORT.
  *
  *   IMPORTANT — CONCURRENT ACCESS:
  *   nos_bde_schan_op() is serialized by schan_mutex.  Without the mutex,
@@ -60,9 +63,8 @@
  *   SCHAN ring-buffer DMA mode (Cumulus driver configures this; state
  *   persists through warm reset).
  *
- *   In this state ALL BAR0 MMIO writes are SILENTLY IGNORED by hardware.
- *   Warm-boot indicators: BAR0+0x158 (DMA_RING_ADDR) = 0x0294ffd0 (Cumulus
- *   ring buffer PA), BAR0+0x148 = 0x80000000 (DMA mode enable).
+ *   Warm-boot indicator: BAR0+0x158 (DMA_RING_ADDR) = 0x0294ffd0 (or
+ *   other non-zero PA = Cumulus ring buffer PA).
  *
  *   PCI reset methods DO NOT help:
  *     - FLR (Function Level Reset): NOT supported by BCM56846

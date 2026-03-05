@@ -33,14 +33,15 @@
 #define POLL_INTERVAL_S     30      /* poll loop period (seconds) */
 #define WDT_KEEPALIVE_S     15      /* watchdog keepalive interval */
 
-/* Fan PWM (CPLD pwm1, scale 0–248) vs temperature thresholds (millidegrees C) */
-#define TEMP_LOW_MC         35000   /* < 35 °C → low fan */
-#define TEMP_MED_MC         45000   /* 35–45 °C → medium fan */
-#define TEMP_HIGH_MC        55000   /* > 55 °C → max fan + log warning */
-#define PWM_LOW             64
-#define PWM_MED             128
-#define PWM_HIGH            200
-#define PWM_MAX             248
+/* Fan PWM (CPLD pwm1, scale 0-100 percent) vs temperature thresholds (millidegrees C).
+ * pct_to_fan_speed() in the CPLD driver maps: >=100->MAX(0x1F), >=70->MID(0x15), >=40->MIN(0x0C) */
+#define TEMP_LOW_MC         35000   /* < 35 C -> low fan */
+#define TEMP_MED_MC         45000   /* 35-45 C -> medium fan */
+#define TEMP_HIGH_MC        55000   /* > 55 C -> max fan + log warning */
+#define PWM_LOW             40      /* 40% -> FAN_SPEED_MIN (0x0C) */
+#define PWM_MED             70      /* 70% -> FAN_SPEED_MID (0x15) */
+#define PWM_HIGH            100     /* 100% -> FAN_SPEED_MAX (0x1F) */
+#define PWM_MAX             100     /* 100% -> FAN_SPEED_MAX (0x1F) */
 
 /* ---- Hardware paths --------------------------------------------------- */
 #define CPLD_BASE       "/sys/devices/platform/ff705000.localbus/ea000000.cpld"
@@ -130,25 +131,62 @@ static void cpld_watchdog_keepalive(void)
 
 static void cpld_check_psu(void)
 {
-	long val;
+	long present, ok;
 	char path[256];
 	for (int psu = 1; psu <= 2; psu++) {
 		snprintf(path, sizeof(path), CPLD_BASE "/psu_pwr%d_present", psu);
-		if (sysfs_read_int(path, &val) == 0)
-			printf("platform-mgrd: PSU%d present=%ld\n", psu, val);
+		if (sysfs_read_int(path, &present) < 0)
+			continue;
+
 		snprintf(path, sizeof(path), CPLD_BASE "/psu_pwr%d_all_ok", psu);
-		if (sysfs_read_int(path, &val) == 0 && !val)
-			printf("platform-mgrd: WARNING PSU%d not OK\n", psu);
+		sysfs_read_int(path, &ok);
+
+		/* Drive PSU LED: green if present+ok, amber if present+fault, off if absent */
+		const char *color = !present ? "off" : (ok ? "green" : "amber");
+		char led_path[256];
+		snprintf(led_path, sizeof(led_path), CPLD_BASE "/led_psu%d", psu);
+		sysfs_write_str(led_path, color);
+
+		if (!present)
+			printf("platform-mgrd: PSU%d absent\n", psu);
+		else if (!ok)
+			printf("platform-mgrd: WARNING PSU%d present but not OK\n", psu);
 	}
 }
 
 static void cpld_check_fans(void)
 {
 	long val;
-	if (sysfs_read_int(CPLD_BASE "/system_fan_ok", &val) == 0 && !val)
+	int fan_ok = 1, fan_present = 1;
+
+	if (sysfs_read_int(CPLD_BASE "/system_fan_ok", &val) == 0 && !val) {
 		printf("platform-mgrd: WARNING fan not OK\n");
-	if (sysfs_read_int(CPLD_BASE "/system_fan_present", &val) == 0 && !val)
+		fan_ok = 0;
+	}
+	if (sysfs_read_int(CPLD_BASE "/system_fan_present", &val) == 0 && !val) {
 		printf("platform-mgrd: WARNING fan not present\n");
+		fan_present = 0;
+	}
+
+	/* Drive FAN LED */
+	const char *fan_color = (!fan_present || !fan_ok) ? "amber" : "green";
+	sysfs_write_str(CPLD_BASE "/led_fan", fan_color);
+
+	/* Log airflow direction once on first poll */
+	static int airflow_logged = 0;
+	if (!airflow_logged) {
+		char airflow[32] = {0};
+		FILE *f = fopen(CPLD_BASE "/system_fan_air_flow", "r");
+		if (f) {
+			if (fgets(airflow, sizeof(airflow), f)) {
+				/* strip newline */
+				airflow[strcspn(airflow, "\n")] = '\0';
+				printf("platform-mgrd: fan airflow: %s\n", airflow);
+			}
+			fclose(f);
+		}
+		airflow_logged = 1;
+	}
 }
 
 static int cpld_set_led(const char *name, const char *color)
@@ -171,7 +209,7 @@ static long thermal_read_max(void)
 	DIR *d = opendir(HWMON_BASE);
 	if (!d) return -1;
 
-	long max_temp = 0;
+	long max_temp = -1;  /* -1 = no sensor readings found */
 	struct dirent *e;
 	while ((e = readdir(d)) != NULL) {
 		if (e->d_name[0] == '.') continue;
@@ -192,6 +230,12 @@ static long thermal_read_max(void)
 static void thermal_manage_fans(long max_mc)
 {
 	int pwm;
+	if (max_mc < 0) {
+		/* No thermal sensors available (e.g. CONFIG_I2C_MPC not enabled).
+		 * Fail-safe: run fans at max to prevent overheating. */
+		cpld_set_fan_pwm(PWM_MAX);
+		return;
+	}
 	if (max_mc < TEMP_LOW_MC)
 		pwm = PWM_LOW;
 	else if (max_mc < TEMP_MED_MC)
@@ -321,13 +365,12 @@ int main(int argc, char **argv)
 
 		/* Full platform poll every POLL_INTERVAL_S seconds */
 		if ((ticks % POLL_INTERVAL_S) == 0) {
-			/* Thermal */
+			/* Thermal — thermal_manage_fans handles -1 (no sensors) as fail-safe */
 			long max_temp = thermal_read_max();
-			if (max_temp > 0) {
-				printf("platform-mgrd: max_temp=%ld.%03ld °C\n",
+			if (max_temp >= 0)
+				printf("platform-mgrd: max_temp=%ld.%03ld C\n",
 					max_temp / 1000, max_temp % 1000);
-				thermal_manage_fans(max_temp);
-			}
+			thermal_manage_fans(max_temp);
 
 			/* PSU and fans */
 			cpld_check_psu();

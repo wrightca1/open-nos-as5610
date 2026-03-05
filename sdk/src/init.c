@@ -161,100 +161,37 @@ int bcm56846_chip_init(int unit)
 	/*
 	 * Step 1: Detect boot mode.
 	 *
-	 * Primary indicator: CMIC_DMA_RING_ADDR (0x158).
-	 *   Non-zero after warm reboot from Cumulus.
-	 *   Zero after cold power cycle OR after test programs cleared it with
-	 *   ww(0x158, 0) — so zero alone is not sufficient.
+	 * Warm-boot indicator: CMIC_DMA_RING_ADDR (BAR0+0x158).
+	 *   Cumulus writes the DMA ring buffer physical address here when CMC2
+	 *   is in DMA ring mode (e.g. 0x0294ffd0 after warm reboot).
+	 *   Zero = cold boot; PIO SCHAN available via BDE ioctl.
+	 *   Non-zero = warm boot from Cumulus; cold power cycle required.
 	 *
-	 * Secondary indicator: SCHAN MSG0 writability probe.
-	 *   In PIO mode (cold boot): 0x3300c (CMC2 MSG0) is a normal R/W
-	 *   register — written value reads back unchanged.
-	 *   In DMA ring-buffer mode: 0x3300c is DMA FIFO SRAM — writes are
-	 *   silently ignored (ring descriptor submission); reads return SRAM
-	 *   content (0x00 or 0xb7), never the written value.
-	 * If 0x158=0 but MSG0 doesn't retain the test pattern, previous
-	 * software cleared 0x158 without exiting DMA ring mode.  Treat as
-	 * warm boot (cold power cycle required).
+	 * DO NOT read or write BAR0+0x0148 for boot mode detection.
+	 *   That register reads 0x80000000 as the hardware power-on default.
+	 *   Writing 0 to it disables SCHAN PIO entirely (confirmed by hardware
+	 *   test 2026-03-04: all SCHAN ops stopped after probe wrote 0 to 0x148).
+	 *   Leave it at its hardware default value.
+	 *
+	 * DO NOT use the MSG0 writability probe here.  At cold boot the
+	 *   BCM56846 power-on self-test leaves SCHAN_CTRL in an error state
+	 *   (observed: 0x77, 0x92) that silently ignores MSG writes.  The
+	 *   nos_kernel_bde.ko SCHAN_OP ioctl handles the abort/clear sequence
+	 *   internally before each operation, so the BDE path is safe to use.
 	 */
 	if (bde_read_reg(CMIC_DMA_RING_ADDR, &dma_ring_addr) != 0) {
 		fprintf(stderr, "[init] CMIC_DMA_RING_ADDR read failed\n");
 		return -1;
 	}
 
-	if (dma_ring_addr == 0u) {
-		/*
-		 * 0x158 is 0 — ambiguous: genuine cold boot OR a previous test
-		 * program wrote 0 to 0x158 without exiting DMA ring mode.
-		 *
-		 * Two-stage detection:
-		 *
-		 * Stage 1: SCHAN_CTRL pre-check.
-		 *   In DMA ring mode, reads from 0x33000 return DMA FIFO SRAM
-		 *   content — the hardware ALWAYS sets DONE when the ring is
-		 *   active (observed: 0xb7, 0x92).  START=1, DONE=0 is therefore
-		 *   IMPOSSIBLE in DMA ring mode.
-		 *
-		 *   At cold boot the BCM56846 power-on init leaves SCHAN in
-		 *   PIO ERROR_ABORT state (SCHAN_CTRL=0x65 = START | error bits,
-		 *   DONE=0).  In PIO ERROR state, MSG register writes are silently
-		 *   ignored by the hardware — making the MSG writability probe
-		 *   unreliable (reads back stale 0x65, not the probe value).
-		 *
-		 *   If START=1 AND DONE=0: this is the PIO ERROR pattern —
-		 *   definitively PIO mode.  Skip MSG probe.
-		 *
-		 * Stage 2: MSG0 writability probe (only if SCHAN_CTRL is
-		 *   ambiguous — e.g. 0x00 after reset, or DMA-like value).
-		 *   Write a known pattern to CMC2 MSG0 (0x3300c), read back.
-		 *   PIO: register retains value.
-		 *   DMA ring: write consumed as descriptor; readback differs.
-		 */
-		uint32_t schan_ctrl_pre = 0u;
-		bde_read_reg(CMIC_CMC0_SCHAN_CTRL, &schan_ctrl_pre);
-
-		if ((schan_ctrl_pre & SCHAN_CTRL_START) &&
-		    !(schan_ctrl_pre & SCHAN_CTRL_DONE)) {
-			/*
-			 * START=1, DONE=0 — PIO ERROR state.  Impossible in DMA
-			 * ring mode.  Genuine cold boot; MSG probe not reliable
-			 * when SCHAN is in error (MSG writes ignored by HW).
-			 */
-			fprintf(stderr,
-				"[init] SCHAN_CTRL=0x%08x: START=1,DONE=0"
-				" -- PIO ERROR state (impossible in DMA mode;"
-				" genuine cold boot; skipping MSG probe)\n",
-				schan_ctrl_pre);
-			/* dma_ring_addr stays 0 → cold boot path */
-		} else {
-			/*
-			 * SCHAN_CTRL is ambiguous (0x00 after reset, or a
-			 * DMA-mode ring value).  Use MSG0 writability probe.
-			 */
-			uint32_t probe = 0x5A5A0000u, readback = 0u;
-			bde_write_reg(CMIC_CMC0_SCHAN_MSG(0), probe);
-			bde_read_reg(CMIC_CMC0_SCHAN_MSG(0), &readback);
-			bde_write_reg(CMIC_CMC0_SCHAN_MSG(0), 0u);
-			if (readback != probe) {
-				/*
-				 * MSG register didn't retain the value — DMA
-				 * ring mode.  A previous software "restore"
-				 * cleared 0x158 but the ring state machine is
-				 * still active.  Cold power cycle required.
-				 */
-				fprintf(stderr,
-					"[init] MSG probe: 0x3300c"
-					" wrote 0x%08x read 0x%08x"
-					" -- CMC2 still in DMA ring mode"
-					" (cold power cycle required)\n",
-					probe, readback);
-				dma_ring_addr = 0xFFFFFFFFu;
-			} else {
-				fprintf(stderr,
-					"[init] MSG probe: 0x3300c writable"
-					" -- CMC2 in PIO mode"
-					" (genuine cold boot)\n");
-			}
-		}
+	{
+		/* Log 0x0148 for diagnostics only -- DO NOT write to it. */
+		uint32_t reg_0148 = 0u;
+		bde_read_reg(CMIC_DMA_CFG, &reg_0148);
+		fprintf(stderr,
+			"[init] BAR0+0x148=0x%08x (HW default 0x80000000;"
+			" DO NOT WRITE) DMA_RING_ADDR=0x%08x\n",
+			reg_0148, dma_ring_addr);
 	}
 
 	warm_boot = (dma_ring_addr != 0u);
