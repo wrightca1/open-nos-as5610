@@ -9,55 +9,33 @@
  * control registers (SBUS_TIMEOUT, SBUS_RING_MAP, SCHAN_CTRL, DMA) all
  * require direct BAR0 access -- which is what bde_{read,write}_reg() provide.
  *
- * Initialization sequence (cold boot only -- see warm-boot note below):
- *   1. Detect boot mode: read CMIC_DMA_RING_ADDR (0x158).
- *      Non-zero = warm reboot from Cumulus; CMC2 is in DMA ring-buffer mode.
- *      Zero     = cold power cycle; CMC2 is in PIO mode.
+ * Initialization sequence (always runs regardless of boot mode):
+ *   1. Log diagnostic registers (0x158, 0x148, 0x10c, 0x400) for debug.
  *   2. Program CMIC_SBUS_TIMEOUT (BAR0+0x200).
  *   3. Program CMIC_SBUS_RING_MAP_0..7 (BAR0+0x204..0x220).
- *   4. (Cold boot only) Clear any stale SCHAN DONE/ERR state.
+ *   3b. Enable LINK40G in CMIC_MISC_CONTROL for XLMAC SBUS access.
+ *   4. Clear stale SCHAN DONE/ERR state (W1C write to SCHAN_CTRL).
  *   5. Verify CMIC accessibility (read SCHAN_CTRL).
+ *   6. De-assert XLPORT soft resets (TOP_SOFT_RESET_REG via SCHAN).
  *
- * PIO ERROR STATE AT COLD BOOT (false positive DMA detection):
- *   At cold boot, the BCM56846 power-on sequence leaves SCHAN in PIO
- *   ERROR_ABORT state: SCHAN_CTRL = 0x65 (START=1, DONE=0, error bits set).
- *   In this state, writes to CMIC CMC2 MSG registers are silently ignored by
- *   the hardware (MSG is locked during SCHAN error).  A naive MSG writability
- *   probe (write known pattern, read back) fails because the readback returns
- *   the stale hardware-init value 0x65, not the written value — identical to
- *   DMA ring mode behavior.
+ * HARDWARE POWER-ON DEFAULTS (confirmed 2026-03-05):
+ *   After cold power cycle, these registers contain non-zero values that
+ *   were previously misidentified as "Cumulus DMA ring mode state":
+ *     BAR0+0x10c = 0x32000043  (SCHAN DMA ring config — HW default)
+ *     BAR0+0x148 = 0x80000000  (CMIC_DMA_CFG — HW default, DO NOT WRITE)
+ *     BAR0+0x400 = 0x505b8d80  (SCHAN DMA ring head pointer — HW default)
+ *   These are hardware power-on defaults, NOT persisted Cumulus state.
+ *   They do NOT indicate that DMA ring mode is active.
  *
- *   This was discovered after a confirmed cold power cycle showed:
- *     MSG probe: 0x3300c wrote 0x5a5a0000 read 0x00000065 -- [falsely] DMA mode
- *   while CMIC_MISC_CONTROL = 0x7df4db0e (hardware default, not software-written)
- *   confirmed it was genuinely cold boot.
+ * BOOT MODE DETECTION:
+ *   CMIC_DMA_RING_ADDR (BAR0+0x158) is the most reliable indicator:
+ *     0x0294ffd0 (or similar non-zero) = warm boot from Cumulus
+ *     0x00000000 = cold boot (P2020 PCIe PERST_N clears this on reboot)
+ *   This value is logged for diagnostics but no longer gates initialization.
+ *   All init steps run regardless of boot mode — the kernel BDE's per-op
+ *   abort/clear in nos_bde_schan_op() handles SCHAN state management.
  *
- *   Fix: SCHAN_CTRL pre-check before MSG probe.  START=1, DONE=0 is IMPOSSIBLE
- *   in DMA ring mode (DMA FIFO SRAM always shows DONE=1).  If START=1 AND
- *   DONE=0, the chip is definitively in PIO mode — skip the MSG probe.
- *
- * WARM BOOT WARNING (DMA ring-buffer mode):
- *   After warm reboot from Cumulus, the BCM56846 CMC2 is in SCHAN DMA
- *   ring-buffer mode.  In this mode, BAR0+0x33000-0x33fff is a read window
- *   into the CMIC's internal SCHAN DMA FIFO SRAM -- NOT writable PIO
- *   registers.  All reads return the stale DMA ring status (0xb7).  All
- *   writes to SCHAN_CTRL and MSG registers are silently ignored or (worse)
- *   interpreted as DMA ring submissions.
- *
- *   Writing 0 to SCHAN_CTRL (0x33000) in DMA mode submits a null descriptor
- *   to the SCHAN DMA ring -- corrupting ring state.  The old "clear stale
- *   SCHAN_CTRL" loop is therefore SKIPPED in warm boot.
- *
- *   PIO SCHAN requires a cold hardware power cycle to reset CMC2 to PIO mode.
- *   This is detected by CMIC_DMA_RING_ADDR (0x158) == 0.
- *
- * Register offsets confirmed from OpenBCM SDK-6.5.16 allregs_c.i
- * (BCM56840 soc_cpureg entries).  Ring map values confirmed from Cumulus
- * switchd binary RE (strings-hex-literals.txt, "User should write" strings
- * for BCM56846/AS5610-52X).  See CUMULUS_REVERSE_ENGINEERING_FINDINGS.md
- * section 11 for the DMA FIFO window discovery and root cause analysis.
- *
- * SCHAN_CTRL = BAR0+0x33000, SCHAN_MSG0 = BAR0+0x3300c (CMC2).
+ * SCHAN_CTRL = BAR0+0x33000, SCHAN_MSG0 = BAR0+0x3300c (CMC1).
  */
 #include "bcm56846_regs.h"
 #include "bde_ioctl.h"
@@ -152,32 +130,25 @@ int bcm56846_chip_init(int unit)
 {
 	uint32_t ctrl = 0;
 	uint32_t dma_ring_addr = 0;
-	int warm_boot;
 	int tries;
 
 	(void)unit;
 	fprintf(stderr, "[init] bcm56846_chip_init: begin\n");
 
 	/*
-	 * Step 1: Detect boot mode.
+	 * Step 1: Log diagnostic registers.
 	 *
-	 * Warm-boot indicator: CMIC_DMA_RING_ADDR (BAR0+0x158).
-	 *   Cumulus writes the DMA ring buffer physical address here when CMC2
-	 *   is in DMA ring mode (e.g. 0x0294ffd0 after warm reboot).
-	 *   Zero = cold boot; PIO SCHAN available via BDE ioctl.
-	 *   Non-zero = warm boot from Cumulus; cold power cycle required.
+	 * These are read-only diagnostics — no gating of init behavior.
 	 *
-	 * DO NOT read or write BAR0+0x0148 for boot mode detection.
-	 *   That register reads 0x80000000 as the hardware power-on default.
-	 *   Writing 0 to it disables SCHAN PIO entirely (confirmed by hardware
-	 *   test 2026-03-04: all SCHAN ops stopped after probe wrote 0 to 0x148).
-	 *   Leave it at its hardware default value.
+	 * CMIC_DMA_RING_ADDR (0x158): non-zero after Cumulus warm boot
+	 *   (Cumulus writes ring buffer PA here).  Zero after cold boot
+	 *   (P2020 PCIe PERST_N clears this register on every reboot).
 	 *
-	 * DO NOT use the MSG0 writability probe here.  At cold boot the
-	 *   BCM56846 power-on self-test leaves SCHAN_CTRL in an error state
-	 *   (observed: 0x77, 0x92) that silently ignores MSG writes.  The
-	 *   nos_kernel_bde.ko SCHAN_OP ioctl handles the abort/clear sequence
-	 *   internally before each operation, so the BDE path is safe to use.
+	 * CMIC_DMA_CFG (0x148): HW default 0x80000000.  DO NOT WRITE.
+	 *
+	 * SCHAN ring regs (0x10c, 0x400): Hardware power-on defaults
+	 *   0x32000043 and 0x505b8d80 respectively.  These are NOT
+	 *   indicators of DMA ring mode — they are always present.
 	 */
 	if (bde_read_reg(CMIC_DMA_RING_ADDR, &dma_ring_addr) != 0) {
 		fprintf(stderr, "[init] CMIC_DMA_RING_ADDR read failed\n");
@@ -185,18 +156,24 @@ int bcm56846_chip_init(int unit)
 	}
 
 	{
-		/* Log 0x0148 for diagnostics only -- DO NOT write to it. */
-		uint32_t reg_0148 = 0u;
+		uint32_t reg_0148 = 0u, ring_cfg = 0u, ring_head = 0u;
 		bde_read_reg(CMIC_DMA_CFG, &reg_0148);
+		bde_read_reg(CMIC_SCHAN_RING_CFG, &ring_cfg);
+		bde_read_reg(CMIC_SCHAN_RING_HEAD, &ring_head);
 		fprintf(stderr,
-			"[init] BAR0+0x148=0x%08x (HW default 0x80000000;"
-			" DO NOT WRITE) DMA_RING_ADDR=0x%08x\n",
-			reg_0148, dma_ring_addr);
+			"[init] diagnostics: DMA_RING_ADDR(0x158)=0x%08x"
+			" DMA_CFG(0x148)=0x%08x\n",
+			dma_ring_addr, reg_0148);
+		fprintf(stderr,
+			"[init] diagnostics: ring_cfg(0x10c)=0x%08x"
+			" ring_head(0x400)=0x%08x"
+			" (HW defaults: 0x32000043, 0x505b8d80)\n",
+			ring_cfg, ring_head);
 	}
 
-	warm_boot = (dma_ring_addr != 0u);
-	fprintf(stderr, "[init] boot mode: %s (DMA_RING_ADDR=0x%08x)\n",
-		warm_boot ? "WARM (DMA mode -- PIO SCHAN unavailable)" : "COLD",
+	fprintf(stderr, "[init] boot hint: %s (DMA_RING_ADDR=0x%08x)\n",
+		(dma_ring_addr == 0u) ? "COLD (0x158=0)" :
+		"WARM (0x158 has Cumulus ring PA)",
 		dma_ring_addr);
 
 	/*
@@ -213,12 +190,7 @@ int bcm56846_chip_init(int unit)
 	 *
 	 * Each register maps 8 agent IDs (4 bits each) to S-bus rings 0-7.
 	 * Values are chip-specific for BCM56846 (Trident+ AS5610-52X), taken
-	 * from Cumulus switchd binary strings:
-	 *   0x43052100 -> agents 0-7
-	 *   0x33333343 -> agents 8-15
-	 *   0x44444333 -> agents 16-23
-	 *   0x00034444 -> agents 24-31
-	 *   0x00000000 -> agents 32-63 (no mapped blocks in BCM56846)
+	 * from Cumulus switchd binary strings.
 	 *
 	 * These registers are writable in both PIO and DMA modes and persist
 	 * across warm reboots.  Programming them here is safe and correct.
@@ -242,12 +214,7 @@ int bcm56846_chip_init(int unit)
 	 *
 	 * CMIC_MISC_CONTROL (BAR0+0x1c) bit 0 = LINK40G_ENABLE.  This bit
 	 * gates SBUS accesses to 40G (XLMAC/XLPORT) port blocks.  Without it,
-	 * every SCHAN op to an XLPORT address (e.g. 0x40a8022a) returns
-	 * SCHAN ERROR_ABORT.  Cumulus sets this via rc.soc:
-	 *   m cmic_misc_control LINK40G_ENABLE=1
-	 * We set it here in chip_init so it's guaranteed regardless of whether
-	 * soc.c handles the 'm' command.  This register is a direct BAR0
-	 * read-write in both PIO and DMA ring-buffer boot modes.
+	 * every SCHAN op to an XLPORT address returns SCHAN ERROR_ABORT.
 	 */
 	{
 		uint32_t misc_ctrl = 0u;
@@ -261,37 +228,23 @@ int bcm56846_chip_init(int unit)
 	}
 
 	/*
-	 * Step 4: Clear stale SCHAN state -- COLD BOOT ONLY.
+	 * Step 4: Clear stale SCHAN state.
 	 *
-	 * In warm boot, BAR0+0x33000 is the SCHAN DMA FIFO submission port.
-	 * Writing anything there submits a DMA descriptor, corrupting the ring.
-	 * Skip entirely in warm boot.
+	 * Always attempt regardless of boot mode.  The kernel BDE's per-op
+	 * abort/clear handles SCHAN state, but clearing here gives a clean
+	 * baseline for the XLPORT deassert probes in step 6.
 	 *
-	 * In cold boot, BCM56846 power-on leaves SCHAN_CTRL = 0x65 (START=1,
-	 * ERROR/ABORT=1, plus upper error bits).  This is the hardware power-on
-	 * state: the CMIC attempted an internal SCHAN calibration, timed out
-	 * (SBUS_TIMEOUT was not yet programmed), and left SCHAN in error state.
-	 *
-	 * Writing 0 to SCHAN_CTRL is WRONG -- CMICm error/status bits are W1C
-	 * (write-1-to-clear); writing 0 has no effect on any set bit.
-	 *
-	 * Correct clear: write 0xFE (bits 1-7 = DONE|ABORT|NACK|... all except
-	 * START bit 0) to:
-	 *   bit 2 (ABORT): trigger ABORT of the stale pending op.  Hardware
-	 *     processes the ABORT, then self-clears START and ABORT.
-	 *   bits 1,3-7: W1C clears DONE and all error/status flags.
-	 *
-	 * We do NOT write bit 0 (START) to avoid accidentally starting a new op.
-	 * After 10ms the abort completes and SCHAN_CTRL should read 0x00.
+	 * CMICm SCHAN_CTRL error/status bits are W1C (write-1-to-clear).
+	 * Write 0xFE (all bits except START) to abort any pending op and
+	 * clear all error flags.
 	 */
-	if (warm_boot) {
-		fprintf(stderr, "[init] warm boot: skipping SCHAN_CTRL clear "
-			"(CMC2 in DMA mode; cold power cycle required for PIO)\n");
-		return 0;
-	}
+	bde_read_reg(CMIC_CMC0_SCHAN_CTRL, &ctrl);
+	fprintf(stderr, "[init] SCHAN_CTRL(0x33000) pre-clear = 0x%08x\n", ctrl);
 
-	bde_write_reg(CMIC_CMC0_SCHAN_CTRL, 0xFEu);  /* ABORT + W1C all errors */
-	usleep(10000);                                 /* 10ms for ABORT to complete */
+	if (ctrl != 0u) {
+		bde_write_reg(CMIC_CMC0_SCHAN_CTRL, 0xFEu);
+		usleep(10000);
+	}
 
 	/* Step 5: Verify CMICm is accessible and SCHAN state is clear. */
 	if (bde_read_reg(CMIC_CMC0_SCHAN_CTRL, &ctrl) != 0) {
@@ -311,19 +264,18 @@ int bcm56846_chip_init(int unit)
 		}
 	}
 
-	fprintf(stderr, "[init] bcm56846_chip_init: SCHAN_CTRL=0x%08x -- SCHAN ready\n",
-		ctrl);
+	fprintf(stderr, "[init] SCHAN_CTRL after clear = 0x%08x%s\n",
+		ctrl, (ctrl == 0u) ? " -- PIO ready" : " -- SCHAN NOT clear (may be DMA mode)");
 
 	/*
 	 * Step 6: De-assert XLPORT soft resets via TOP_SOFT_RESET_REG.
 	 *
 	 * At cold boot, the BCM56846 TOP block holds all XLPORT blocks in
 	 * software reset.  Every SCHAN access to an XLPORT address returns
-	 * ERROR_ABORT until these reset bits are cleared.  We probe several
-	 * candidate SBUS addresses for TOP_SOFT_RESET_REG and clear the
-	 * XLP_RESET bits.
+	 * ERROR_ABORT until these reset bits are cleared.
 	 *
-	 * This must happen AFTER SCHAN is confirmed working (Step 5).
+	 * Attempt even if SCHAN_CTRL is not fully clear — the kernel BDE's
+	 * per-op abort/clear may succeed where the init-time clear did not.
 	 */
 	bcm56846_xlport_deassert_reset();
 

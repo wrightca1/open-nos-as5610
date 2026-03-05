@@ -132,9 +132,11 @@ elif [ "$BUILD_KERNEL" = "1" ]; then
         -e CONFIG_NET_VENDOR_FREESCALE \
         -e CONFIG_GIANFAR \
         2>/dev/null || true
-    # I2C: chardev (/dev/i2c-*), mux support, PCA954x (PCA9548/PCA9546 on AS5610)
+    # I2C: bus controller (MPC for P2020 ff703000/ff703100), chardev (/dev/i2c-*),
+    # mux support, PCA954x (PCA9548/PCA9546 on AS5610)
     # GPIO: PCA953x (pca9506/pca9538 I/O expanders for SFP presence/LEDs)
     ./scripts/config \
+        -e CONFIG_I2C_MPC \
         -e CONFIG_I2C_CHARDEV \
         -e CONFIG_I2C_MUX \
         -e CONFIG_I2C_MUX_PCA954X \
@@ -197,6 +199,13 @@ config ACCTON_AS5610_52X\
         warn "Kernel patch not found at $PATCH_DIR/$PLAT_85XX/accton_as5610_52x.c -- skipping."
         warn "Without this patch the kernel will panic: 'No suitable machine description found'"
     fi
+
+    # Clean version string: "5.10.0-nos" instead of "5.10.0-dirty"
+    # CONFIG_LOCALVERSION_AUTO appends +git-hash-dirty when tree has uncommitted changes
+    # (our AS5610 machine patch is uncommitted). Disable it and set a fixed suffix.
+    ./scripts/config --set-str CONFIG_LOCALVERSION "-nos"
+    ./scripts/config -d CONFIG_LOCALVERSION_AUTO
+    2>/dev/null || true
 
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- olddefconfig
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- uImage modules -j$(nproc)

@@ -19,7 +19,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 STAGING="${ROOTFS_STAGING:-$SCRIPT_DIR/staging}"
 OUT_DIR="${ROOTFS_OUT_DIR:-$REPO_ROOT/onie-installer}"
 OUT_FILE="${ROOTFS_OUT:-$OUT_DIR/sysroot.squash.xz}"
-KERNEL_VERSION="${KERNEL_VERSION:-5.10.0-dirty}"
+KERNEL_VERSION="${KERNEL_VERSION:-5.10.0-nos}"
 BUILD_ARTIFACTS="${BUILD_ARTIFACTS:-1}"
 
 # Debian jessie archive (EOL; use archive.debian.org)

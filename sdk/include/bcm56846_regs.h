@@ -28,28 +28,34 @@
 #define CMICM_DMA_STAT            0x31150u
 
 /*
- * Cold-boot detection registers.
+ * CMIC diagnostic and boot-detection registers.
+ *
+ * BCM56846 hardware power-on defaults (confirmed after cold power cycle 2026-03-05):
+ *   BAR0+0x10c = 0x32000043  SCHAN DMA ring config (HW default, NOT Cumulus state)
+ *   BAR0+0x148 = 0x80000000  CMIC_DMA_CFG (HW default, DO NOT WRITE)
+ *   BAR0+0x400 = 0x505b8d80  SCHAN DMA ring head pointer (HW default)
+ * These values are always present after power-on and do NOT indicate that
+ * DMA ring mode is active.  They were previously misidentified as persisted
+ * Cumulus DMA ring state.
  *
  * CMIC_DMA_CFG (BAR0+0x148):
- *   Reads 0x80000000 as the BCM56846 hardware power-on default.
- *   Function of bit31 is not fully decoded, but hardware tests (2026-03-04)
- *   confirm: writing 0 to this register DISABLES SCHAN PIO entirely.
- *   DO NOT write to this register.  Read for diagnostic display only.
- *   The name "DMA_CFG" is tentative; it may be a SCHAN PIO enable register.
+ *   Reads 0x80000000 as hardware default.  Writing 0 DISABLES SCHAN PIO
+ *   entirely (confirmed 2026-03-04).  DO NOT write to this register.
  *
  * CMIC_DMA_RING_ADDR (BAR0+0x158):
- *   Cumulus writes the host physical address of the CMC2 SCHAN DMA ring
- *   descriptor buffer here when DMA ring mode is activated (warm reboot).
- *   Non-zero = warm boot (Cumulus DMA mode active); PIO SCHAN via BDE ioctl
- *   is unavailable until cold power cycle.
- *   Zero = cold boot; SCHAN PIO via nos_kernel_bde.ko BDE ioctl is available.
+ *   The ONLY reliable warm/cold boot discriminator:
+ *   Non-zero = Cumulus wrote its ring buffer PA here (warm boot).
+ *   Zero = cold boot (P2020 PCIe PERST_N clears this on every reboot).
  *
- * NOTE: A previous version of this header incorrectly named DMA_RING_ADDR as
- * CMIC_MIIM_PARAM.  MIIM_PARAM is at a different offset (0x0230).
+ * CMIC_SCHAN_RING_CFG (BAR0+0x10c) and CMIC_SCHAN_RING_HEAD (BAR0+0x400):
+ *   Read-only diagnostics.  HW defaults 0x32000043 and 0x505b8d80.
+ *   Logged by chip_init and nos_bde_probe for debug purposes.
  */
 #define CMIC_DMA_CFG              0x0148u   /* DO NOT WRITE (HW default 0x80000000) */
 #define CMIC_DMA_CFG_ENABLE       (1u << 31) /* tentative; writing 0 breaks SCHAN */
-#define CMIC_DMA_RING_ADDR        0x0158u   /* Non-zero = warm boot, DMA mode */
+#define CMIC_DMA_RING_ADDR        0x0158u   /* Non-zero = warm boot (Cumulus ring PA) */
+#define CMIC_SCHAN_RING_CFG       0x010cu   /* HW default 0x32000043 */
+#define CMIC_SCHAN_RING_HEAD      0x0400u   /* HW default 0x505b8d80 */
 
 /*
  * CMIC_MISC_CONTROL (BAR0+0x1c).

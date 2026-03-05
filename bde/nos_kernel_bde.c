@@ -37,9 +37,16 @@
  * 0x3300c/CMC2, 0x1000c/alias).  libopennsl uses the 0x3300c set = CMC2.
  *
  * COLD-BOOT SCHAN STATE (confirmed experimentally):
- *   After a hard power cycle the BCM56846 CMICm comes up in PIO mode.
+ *   After a hard power cycle / reboot, SCHAN_CTRL may contain stale
+ *   error state (0x65, 0x77, etc.) from the hardware power-on self-test.
  *   Cold-boot indicator: BAR0+0x158 (DMA_RING_ADDR) = 0x00000000.
  *   BAR0+0x148 reads 0x80000000 as the HARDWARE POWER-ON DEFAULT.
+ *
+ *   HARDWARE POWER-ON DEFAULTS (NOT DMA mode indicators):
+ *     BAR0+0x10c = 0x32000043  (SCHAN DMA ring config — always present)
+ *     BAR0+0x400 = 0x505b8d80  (SCHAN DMA ring head — always present)
+ *   These values were previously misidentified as Cumulus DMA ring state.
+ *   They are hardware defaults that exist after cold power cycle.
  *
  *   IMPORTANT: DO NOT write 0 to BAR0+0x148.  Hardware test 2026-03-04
  *   confirmed: writing 0 to BAR0+0x148 disables SCHAN PIO entirely.
@@ -167,6 +174,55 @@ static int nos_bde_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	bde_priv = priv;
 	pr_info("nos-kernel-bde: BCM56846 at %pR, BAR0 %p, DMA %pad size %zu\n",
 		&pdev->resource[0], priv->bar0, &priv->dma_pbase, priv->dma_size);
+
+	/*
+	 * SCHAN diagnostics and PIO initialization.
+	 *
+	 * Log key CMICm registers to help diagnose SCHAN mode (PIO vs DMA).
+	 * Then attempt to clear stale SCHAN state so PIO is ready before
+	 * any userspace SCHAN_OP ioctl.
+	 *
+	 * Hardware power-on defaults (NOT indicators of DMA ring mode):
+	 *   0x10c = 0x32000043 (SCHAN DMA ring config)
+	 *   0x400 = 0x505b8d80 (SCHAN DMA ring head pointer)
+	 *   0x148 = 0x80000000 (CMIC_DMA_CFG — DO NOT WRITE)
+	 *
+	 * Cumulus warm-boot indicator:
+	 *   0x158 = non-zero (Cumulus ring buffer PA, e.g. 0x0294ffd0)
+	 *   0x158 = 0 after cold boot (PERST_N clears this)
+	 */
+	{
+		void __iomem *bar0 = priv->bar0;
+		u32 schan_ctrl, ring_cfg, ring_addr, ring_head, dma_cfg;
+
+		schan_ctrl = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
+		ring_cfg   = ioread32(bar0 + 0x10c);
+		ring_addr  = ioread32(bar0 + 0x158);
+		ring_head  = ioread32(bar0 + 0x400);
+		dma_cfg    = ioread32(bar0 + 0x148);
+
+		pr_info("nos-bde: SCHAN diag: ctrl=0x%08x ring_cfg=0x%08x"
+			" ring_addr=0x%08x ring_head=0x%08x dma_cfg=0x%08x\n",
+			schan_ctrl, ring_cfg, ring_addr, ring_head, dma_cfg);
+
+		/* Attempt PIO SCHAN clear: abort stale ops + W1C all errors */
+		if (schan_ctrl != 0) {
+			u32 cleared;
+			iowrite32(0xFEu, bar0 + CMIC_CMC0_SCHAN_CTRL);
+			mdelay(10);
+			cleared = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
+			if (cleared == 0)
+				pr_info("nos-bde: SCHAN PIO cleared OK"
+					" (was 0x%08x, now 0x00)\n", schan_ctrl);
+			else
+				pr_warn("nos-bde: SCHAN PIO clear incomplete"
+					" (was 0x%08x, now 0x%08x)\n",
+					schan_ctrl, cleared);
+		} else {
+			pr_info("nos-bde: SCHAN_CTRL already 0x00 -- PIO ready\n");
+		}
+	}
+
 	return 0;
 
 err_dma:
