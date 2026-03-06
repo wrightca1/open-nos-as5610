@@ -1,0 +1,1313 @@
+/dts-v1/;
+
+/ {
+	model = "accton,as5610_52x";
+	compatible = "accton,as5610_52x";
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	interrupt-parent = <0x01>;
+
+	aliases {
+		ethernet0 = "/soc@ff700000/ethernet@24000";
+		serial0 = "/soc@ff700000/serial@4500";
+		pci1 = "/pcie@ff70a000";
+	};
+
+	cpus {
+		#address-cells = <0x01>;
+		#size-cells = <0x00>;
+
+		PowerPC,P2020@0 {
+			device_type = "cpu";
+			reg = <0x00>;
+			next-level-cache = <0x01>;
+		};
+
+		PowerPC,P2020@1 {
+			device_type = "cpu";
+			reg = <0x01>;
+			next-level-cache = <0x01>;
+		};
+	};
+
+	memory {
+		device_type = "memory";
+	};
+
+	bcm_dma {
+		compatible = "early-dma-alloc";
+		region_size = <0x4000000>;
+		alignment = <0x100000>;
+	};
+
+	localbus@ff705000 {
+		#address-cells = <0x02>;
+		#size-cells = <0x01>;
+		compatible = "fsl,p2020-elbc", "fsl,elbc", "simple-bus";
+		reg = <0x00 0xff705000 0x00 0x1000>;
+		interrupts = <0x13 0x02>;
+		ranges = <0x00 0x00 0x00 0xefc00000 0x400000 0x01 0x00 0x00 0xea000000 0x100>;
+
+		flash@0,0 {
+			#address-cells = <0x01>;
+			#size-cells = <0x01>;
+			compatible = "cfi-flash";
+			reg = <0x00 0x00 0x400000>;
+			bank-width = <0x01>;
+			device-width = <0x01>;
+
+			partition@0 {
+				reg = <0x00 0x360000>;
+				label = "onie";
+			};
+
+			partition@1 {
+				reg = <0x360000 0x10000>;
+				label = "uboot-env";
+				env_size = <0x2000>;
+			};
+
+			partition@2 {
+				reg = <0x370000 0x10000>;
+				label = "board_eeprom";
+			};
+
+			partition@3 {
+				reg = <0x380000 0x80000>;
+				label = "uboot";
+			};
+		};
+
+		cpld@1,0 {
+			compatible = "accton,accton_as5610_52x-cpld";
+			reg = <0x01 0x00 0x100>;
+		};
+	};
+
+	soc@ff700000 {
+		#address-cells = <0x01>;
+		#size-cells = <0x01>;
+		device_type = "soc";
+		compatible = "fsl,p2020-immr", "simple-bus";
+		ranges = <0x00 0x00 0xff700000 0x100000>;
+		bus-frequency = <0x00>;
+
+		memory-controller@2000 {
+			compatible = "fsl,p2020-memory-controller";
+			reg = <0x2000 0x1000>;
+			interrupts = <0x12 0x02>;
+		};
+
+		i2c@3000 {
+			#address-cells = <0x01>;
+			#size-cells = <0x00>;
+			cell-index = <0x00>;
+			compatible = "fsl-i2c";
+			reg = <0x3000 0x100>;
+			interrupts = <0x2b 0x02>;
+			dfsrr;
+			fsl,timeout = <0x2710>;
+			fsl,preserve-clocking;
+
+			mux@70 {
+				compatible = "ti,pca9548";
+				reg = <0x70>;
+				#address-cells = <0x01>;
+				#size-cells = <0x00>;
+
+				i2c@0 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x00>;
+
+					rtc@51 {
+						compatible = "epson,rtc8564";
+						reg = <0x51>;
+					};
+				};
+
+				i2c@1 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x01>;
+
+					psu_eeprom@3a {
+						compatible = "at,24c02";
+						reg = <0x3a>;
+						label = "psu1_eeprom";
+						read-only;
+					};
+
+					psu_unknown@3e {
+						compatible = "at,24c02";
+						reg = <0x3e>;
+						label = "psu1_eeprom";
+						read-only;
+					};
+
+					psu_eeprom@78 {
+						compatible = "at,24c02";
+						reg = <0x78>;
+						label = "psu1_eeprom";
+						read-only;
+					};
+				};
+
+				i2c@2 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x02>;
+
+					psu_eeprom@0c {
+						compatible = "at,24c02";
+						reg = <0x0c>;
+						label = "psu2_eeprom";
+						read-only;
+					};
+
+					psu_unknown@39 {
+						compatible = "at,24c02";
+						reg = <0x39>;
+						label = "psu2_eeprom2";
+						read-only;
+					};
+
+					psu_eeprom@3d {
+						compatible = "at,24c02";
+						reg = <0x3d>;
+						label = "psu2_eeprom";
+						read-only;
+					};
+
+					psu_eeprom@78 {
+						compatible = "at,24c02";
+						reg = <0x78>;
+						label = "psu2_eeprom";
+						read-only;
+					};
+				};
+
+				i2c@3 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x03>;
+				};
+
+				i2c@4 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x04>;
+				};
+
+				i2c@5 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x05>;
+				};
+
+				i2c@6 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x06>;
+				};
+
+				i2c@7 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x07>;
+
+					hwmon@4d {
+						compatible = "nxp,max6697";
+						reg = <0x4d>;
+					};
+
+					tmon@18 {
+						compatible = "nxp,max1617";
+						reg = <0x18>;
+					};
+				};
+			};
+		};
+
+		i2c@3100 {
+			#address-cells = <0x01>;
+			#size-cells = <0x00>;
+			cell-index = <0x01>;
+			compatible = "fsl-i2c";
+			reg = <0x3100 0x100>;
+			interrupts = <0x2b 0x02>;
+			dfsrr;
+			fsl,preserve-clocking;
+
+			mux@75 {
+				compatible = "ti,pca9546";
+				reg = <0x75>;
+				deselect-on-exit;
+				#address-cells = <0x01>;
+				#size-cells = <0x00>;
+
+				i2c@0 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x00>;
+
+					mux@74 {
+						compatible = "ti,pca9548";
+						reg = <0x74>;
+						#address-cells = <0x01>;
+						#size-cells = <0x00>;
+
+						i2c@0 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x00>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port1";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_0";
+							};
+						};
+
+						i2c@1 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x01>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port2";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_1";
+							};
+						};
+
+						i2c@2 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x02>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port3";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_2";
+							};
+						};
+
+						i2c@3 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x03>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port4";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_3";
+							};
+						};
+
+						i2c@4 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x04>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port5";
+							};
+						};
+
+						i2c@5 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x05>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port6";
+							};
+						};
+
+						i2c@6 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x06>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port7";
+							};
+						};
+
+						i2c@7 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x07>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port8";
+							};
+						};
+					};
+				};
+
+				i2c@1 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x01>;
+
+					mux@74 {
+						compatible = "ti,pca9548";
+						reg = <0x74>;
+						#address-cells = <0x01>;
+						#size-cells = <0x00>;
+
+						i2c@0 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x00>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port9";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_4";
+							};
+						};
+
+						i2c@1 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x01>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port10";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_5";
+							};
+						};
+
+						i2c@2 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x02>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port11";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_6";
+							};
+						};
+
+						i2c@3 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x03>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port12";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_7";
+							};
+						};
+
+						i2c@4 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x04>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port13";
+							};
+						};
+
+						i2c@5 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x05>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port14";
+							};
+						};
+
+						i2c@6 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x06>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port15";
+							};
+						};
+
+						i2c@7 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x07>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port16";
+							};
+						};
+					};
+				};
+
+				i2c@2 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x02>;
+
+					mux@74 {
+						compatible = "ti,pca9548";
+						reg = <0x74>;
+						#address-cells = <0x01>;
+						#size-cells = <0x00>;
+
+						i2c@0 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x00>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port17";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_8";
+							};
+						};
+
+						i2c@1 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x01>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port18";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_9";
+							};
+						};
+
+						i2c@2 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x02>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port19";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_10";
+							};
+						};
+
+						i2c@3 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x03>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port20";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_rx_eq_11";
+							};
+						};
+
+						i2c@4 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x04>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port21";
+							};
+						};
+
+						i2c@5 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x05>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port22";
+							};
+						};
+
+						i2c@6 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x06>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port23";
+							};
+						};
+
+						i2c@7 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x07>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port24";
+							};
+						};
+					};
+				};
+
+				i2c@3 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x03>;
+
+					mux@74 {
+						compatible = "ti,pca9548";
+						reg = <0x74>;
+						#address-cells = <0x01>;
+						#size-cells = <0x00>;
+
+						i2c@0 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x00>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port25";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_0";
+							};
+						};
+
+						i2c@1 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x01>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port26";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_1";
+							};
+						};
+
+						i2c@2 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x02>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port27";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_2";
+							};
+						};
+
+						i2c@3 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x03>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port28";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_3";
+							};
+						};
+
+						i2c@4 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x04>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port29";
+							};
+						};
+
+						i2c@5 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x05>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port30";
+							};
+						};
+
+						i2c@6 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x06>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port31";
+							};
+						};
+
+						i2c@7 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x07>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port32";
+							};
+						};
+					};
+				};
+			};
+
+			mux@76 {
+				compatible = "ti,pca9546";
+				reg = <0x76>;
+				deselect-on-exit;
+				#address-cells = <0x01>;
+				#size-cells = <0x00>;
+
+				i2c@0 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x00>;
+
+					mux@74 {
+						compatible = "ti,pca9548";
+						reg = <0x74>;
+						#address-cells = <0x01>;
+						#size-cells = <0x00>;
+
+						i2c@0 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x00>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port33";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_4";
+							};
+						};
+
+						i2c@1 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x01>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port34";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_5";
+							};
+						};
+
+						i2c@2 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x02>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port35";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_6";
+							};
+						};
+
+						i2c@3 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x03>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port36";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_7";
+							};
+						};
+
+						i2c@4 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x04>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port37";
+							};
+						};
+
+						i2c@5 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x05>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port38";
+							};
+						};
+
+						i2c@6 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x06>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port39";
+							};
+						};
+
+						i2c@7 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x07>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port40";
+							};
+						};
+					};
+				};
+
+				i2c@1 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x01>;
+
+					mux@74 {
+						compatible = "ti,pca9548";
+						reg = <0x74>;
+						#address-cells = <0x01>;
+						#size-cells = <0x00>;
+
+						i2c@0 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x00>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port41";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_8";
+							};
+						};
+
+						i2c@1 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x01>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port42";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_9";
+							};
+						};
+
+						i2c@2 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x02>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port43";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_10";
+							};
+						};
+
+						i2c@3 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x03>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port44";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "sfp_tx_eq_11";
+							};
+						};
+
+						i2c@4 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x04>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port45";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "qsfp_tx_eq_0";
+							};
+						};
+
+						i2c@5 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x05>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port46";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "qsfp_tx_eq_1";
+							};
+						};
+
+						i2c@6 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x06>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port47";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "qsfp_tx_eq_2";
+							};
+						};
+
+						i2c@7 {
+							#address-cells = <0x01>;
+							#size-cells = <0x00>;
+							reg = <0x07>;
+
+							sfp_eeprom@50 {
+								compatible = "at,24c04";
+								reg = <0x50>;
+								label = "port48";
+							};
+
+							retimer@27 {
+								compatible = "ti,ds100df410";
+								reg = <0x27>;
+								label = "qsfp_tx_eq_3";
+							};
+						};
+					};
+				};
+
+				i2c@2 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x02>;
+
+					gpio@20 {
+						compatible = "ti,pca9506";
+						reg = <0x20>;
+					};
+
+					gpio@21 {
+						compatible = "ti,pca9506";
+						reg = <0x21>;
+					};
+
+					gpio@70 {
+						compatible = "ti,pca9538";
+						reg = <0x70>;
+					};
+
+					gpio@71 {
+						compatible = "ti,pca9538";
+						reg = <0x71>;
+					};
+
+					gpio@72 {
+						compatible = "ti,pca9538";
+						reg = <0x72>;
+					};
+
+					gpio@73 {
+						compatible = "ti,pca9538";
+						reg = <0x73>;
+					};
+				};
+
+				i2c@3 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x03>;
+
+					gpio@20 {
+						compatible = "ti,pca9506";
+						reg = <0x20>;
+					};
+
+					gpio@23 {
+						compatible = "ti,pca9506";
+						reg = <0x23>;
+					};
+
+					gpio@24 {
+						compatible = "ti,pca9506";
+						reg = <0x24>;
+					};
+				};
+			};
+
+			mux@77 {
+				compatible = "ti,pca9546";
+				reg = <0x77>;
+				deselect-on-exit;
+				#address-cells = <0x01>;
+				#size-cells = <0x00>;
+
+				i2c@0 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x00>;
+
+					sfp_eeprom@50 {
+						compatible = "sff8436";
+						reg = <0x50>;
+						label = "port49";
+					};
+
+					retimer@27 {
+						compatible = "ti,ds100df410";
+						reg = <0x27>;
+						label = "qsfp_rx_eq_0";
+					};
+				};
+
+				i2c@1 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x01>;
+
+					sfp_eeprom@50 {
+						compatible = "sff8436";
+						reg = <0x50>;
+						label = "port50";
+					};
+
+					retimer@27 {
+						compatible = "ti,ds100df410";
+						reg = <0x27>;
+						label = "qsfp_rx_eq_1";
+					};
+				};
+
+				i2c@2 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x02>;
+
+					sfp_eeprom@50 {
+						compatible = "sff8436";
+						reg = <0x50>;
+						label = "port51";
+					};
+
+					retimer@27 {
+						compatible = "ti,ds100df410";
+						reg = <0x27>;
+						label = "qsfp_rx_eq_2";
+					};
+				};
+
+				i2c@3 {
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					reg = <0x03>;
+
+					sfp_eeprom@50 {
+						compatible = "sff8436";
+						reg = <0x50>;
+						label = "port52";
+					};
+
+					retimer@27 {
+						compatible = "ti,ds100df410";
+						reg = <0x27>;
+						label = "qsfp_rx_eq_3";
+					};
+				};
+			};
+		};
+
+		serial@4500 {
+			cell-index = <0x00>;
+			device_type = "serial";
+			compatible = "ns16550";
+			reg = <0x4500 0x100>;
+			clock-frequency = <0x00>;
+			interrupts = <0x2a 0x02>;
+		};
+
+		l2-cache-controller@20000 {
+			compatible = "fsl,p2020-l2-cache-controller";
+			reg = <0x20000 0x1000>;
+			cache-line-size = <0x20>;
+			cache-size = <0x80000>;
+			interrupts = <0x10 0x02>;
+		};
+
+		usb@22000 {
+			compatible = "fsl-usb2-dr";
+			reg = <0x22000 0x1000>;
+			#address-cells = <0x01>;
+			#size-cells = <0x00>;
+			interrupts = <0x1c 0x02>;
+			phy_type = "ulpi";
+			dr_mode = "host";
+		};
+
+		mdio@24520 {
+			#address-cells = <0x01>;
+			#size-cells = <0x00>;
+			compatible = "fsl,gianfar-mdio";
+			reg = <0x24520 0x20>;
+
+			ethernet-phy@1 {
+				reg = <0x01>;
+				device_type = "ethernet-phy";
+				linux,phandle = <0x02>;
+				phandle = <0x02>;
+			};
+		};
+
+		ethernet@24000 {
+			#address-cells = <0x01>;
+			#size-cells = <0x01>;
+			cell-index = <0x01>;
+			device_type = "network";
+			model = "eTSEC";
+			compatible = "gianfar";
+			reg = <0x24000 0x1000>;
+			ranges = <0x00 0x24000 0x1000>;
+			interrupts = <0x1d 0x02 0x1e 0x02 0x22 0x02>;
+			phy-handle = <0x02>;
+			phy-connection-type = "rgmii";
+		};
+
+		pic@40000 {
+			interrupt-controller;
+			#address-cells = <0x00>;
+			#interrupt-cells = <0x02>;
+			reg = <0x40000 0x40000>;
+			compatible = "chrp,open-pic";
+			device_type = "open-pic";
+			linux,phandle = <0x01>;
+			phandle = <0x01>;
+		};
+
+		global-utilities@e0000 {
+			compatible = "fsl,p2020-guts", "fsl,mpc8548-guts";
+			reg = <0xe0000 0x1000>;
+			fsl,has-rstcr;
+		};
+	};
+
+	pcie@ff70a000 {
+		compatible = "fsl,mpc8548-pcie";
+		device_type = "pci";
+		#interrupt-cells = <0x01>;
+		#size-cells = <0x02>;
+		#address-cells = <0x03>;
+		reg = <0x00 0xff70a000 0x00 0x1000>;
+		bus-range = <0x00 0xff>;
+		ranges = <0x2000000 0x00 0xa0000000 0x00 0xa0000000 0x00 0x20000000 0x1000000 0x00 0x00 0x00 0xffc20000 0x00 0x10000>;
+		clock-frequency = <0x5f5e100>;
+		interrupts = <0x1a 0x02>;
+		interrupt-map-mask = <0xf800 0x00 0x00 0x07>;
+		interrupt-map = <0x00 0x00 0x00 0x01 0x01 0x00 0x01 0x00 0x00 0x00 0x02 0x01 0x00 0x01 0x00 0x00 0x00 0x03 0x01 0x00 0x01 0x00 0x00 0x00 0x04 0x01 0x00 0x01>;
+
+		pcie@0 {
+			reg = <0x00 0x00 0x00 0x00 0x00>;
+			#size-cells = <0x02>;
+			#address-cells = <0x03>;
+			device_type = "pci";
+			ranges = <0x2000000 0x00 0xa0000000 0x2000000 0x00 0xa0000000 0x00 0x20000000 0x1000000 0x00 0x00 0x1000000 0x00 0x00 0x00 0x10000>;
+		};
+	};
+};
