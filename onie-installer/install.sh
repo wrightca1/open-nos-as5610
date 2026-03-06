@@ -4,6 +4,8 @@
 # Payload after __ARCHIVE__: control.tar.xz, data.tar
 
 set -e
+# ONIE busybox keeps fdisk, blockdev etc. in /sbin which may not be in PATH
+export PATH="/sbin:/usr/sbin:$PATH"
 INSTALLER_DIR="${INSTALLER_DIR:-/tmp/onie-nos-install}"
 ARCHIVE_MARKER="__ARCHIVE__"
 
@@ -132,6 +134,7 @@ tar -xOf /tmp/_nos_payload.bin sysroot.squash.xz 2>/dev/null | dd of="/dev/${RDE
 	fi
 
 echo "Install complete. Rebooting..."
-reboot
+# Try multiple reboot paths (ONIE busybox may have reboot in different locations)
+/sbin/reboot 2>/dev/null || reboot 2>/dev/null || true
 exit 0
 __ARCHIVE__

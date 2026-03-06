@@ -104,6 +104,8 @@ elif [ "$BUILD_KERNEL" = "1" ]; then
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- "$DEFCONFIG"
     # Enable loadable modules (required for BDE .ko) and TUN, I2C, PCI, etc. for AS5610
     ./scripts/config -e CONFIG_MODULES -e CONFIG_TUN -e CONFIG_PCI -e CONFIG_I2C -e CONFIG_HWMON 2>/dev/null || true
+    # USB subsystem (dependency for USB_STORAGE and USB_EHCI_*)
+    ./scripts/config -e CONFIG_USB 2>/dev/null || true
     # Storage drivers required for USB flash boot (all built-in, not modules)
     ./scripts/config \
         -e CONFIG_BLK_DEV_SD \
@@ -135,16 +137,22 @@ elif [ "$BUILD_KERNEL" = "1" ]; then
     # I2C: bus controller (MPC for P2020 ff703000/ff703100), chardev (/dev/i2c-*),
     # mux support, PCA954x (PCA9548/PCA9546 on AS5610)
     # GPIO: PCA953x (pca9506/pca9538 I/O expanders for SFP presence/LEDs)
+    # GPIOLIB: required dependency for PCA954x mux driver
     ./scripts/config \
+        -e CONFIG_GPIOLIB \
         -e CONFIG_I2C_MPC \
         -e CONFIG_I2C_CHARDEV \
         -e CONFIG_I2C_MUX \
-        -e CONFIG_I2C_MUX_PCA954X \
         -e CONFIG_GPIO_PCA953X \
         2>/dev/null || true
-    # Hwmon: LM75 (board temp sensors on i2c-9), NE1617A/LM90 (ASIC+board)
-    # AT24 EEPROM driver: binds to SFP 0x50 → /sys/class/eeprom_dev/eepromN/device/eeprom
+    # PCA954x: Kconfig symbol has lowercase 'x'; scripts/config uppercases it,
+    # breaking the dependency check. Use sed to set it directly.
+    sed -i 's/^# CONFIG_I2C_MUX_PCA954x is not set/CONFIG_I2C_MUX_PCA954x=y/' .config 2>/dev/null || true
+    # Hwmon: ADM1021 (MAX1617 board temp on i2c-9@0x18), MAX6697 (multi-ch on i2c-9@0x4d),
+    # LM75/LM90 (for other temp sensors), AT24 EEPROM (SFP 0x50)
     ./scripts/config \
+        -e CONFIG_SENSORS_ADM1021 \
+        -e CONFIG_SENSORS_MAX6697 \
         -e CONFIG_SENSORS_LM75 \
         -e CONFIG_SENSORS_LM90 \
         -e CONFIG_EEPROM_AT24 \

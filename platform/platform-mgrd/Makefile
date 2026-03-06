@@ -3,7 +3,7 @@
 # Install: DESTDIR=/path make install
 
 CC = $(CROSS_COMPILE)gcc
-CFLAGS = -Wall -O2
+CFLAGS = -Wall -O2 -static
 TARGET = platform-mgrd
 
 all: $(TARGET)

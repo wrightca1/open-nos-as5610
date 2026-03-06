@@ -214,6 +214,9 @@ OVERLAY="$SCRIPT_DIR/overlay"
 if [ -d "$OVERLAY" ]; then
 	log "Applying overlay..."
 	cp -a "$OVERLAY"/. "$STAGING/"
+	# Fix ownership: overlay files may be owned by build user (uid 1000)
+	# SSH requires authorized_keys owned by root; fix all overlay files
+	chown -R 0:0 "$STAGING/root/.ssh" 2>/dev/null || true
 fi
 
 # --- Enable systemd services ---
@@ -232,13 +235,14 @@ mkdir -p "$STAGING/mnt/persist"
 # Hostname
 echo "as5610" > "$STAGING/etc/hostname"
 
-# Allow root SSH login (for initial setup; restrict in production)
+# Allow root SSH login with password (for initial setup; restrict in production)
 if [ -f "$STAGING/etc/ssh/sshd_config" ]; then
 	sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' "$STAGING/etc/ssh/sshd_config" || true
+	sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' "$STAGING/etc/ssh/sshd_config" || true
 fi
 
-# Empty root password for initial console access
-chroot "$STAGING" passwd -d root 2>/dev/null || true
+# Default root password: as5610
+echo 'root:as5610' | chroot "$STAGING" chpasswd 2>/dev/null || true
 
 # Remove qemu-static and policy-rc.d from rootfs before packing
 rm -f "$STAGING/usr/bin/qemu-ppc-static" "$STAGING/usr/bin/qemu-powerpc-static" 2>/dev/null || true
