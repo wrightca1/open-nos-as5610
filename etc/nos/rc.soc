@@ -1,0 +1,21 @@
+# open-nos-as5610 rc.soc
+#
+# Note: bcm56846_chip_init() (SBUS ring maps, SCHAN clear, XLPORT reset
+# deassert, LINK40G_ENABLE) is called directly by bcm56846_init() before
+# this script runs.  No "init all" needed here.
+
+# XLMAC TX control (per-port block, uses SCHAN)
+setreg xmac_tx_ctrl 0xc802
+
+# IFP meter parity errata workaround
+setreg ifp_meter_parity_control 0
+
+# RX drop statistics
+setreg rdbgc0_select 0x04000d11
+setreg rdbgc3_select 0x00000011
+setreg rdbgc4_select 0x00000100
+setreg rdbgc5_select 0x00002000
+setreg rdbgc6_select 0x00008000
+
+# TX drop statistics
+setreg tdbgc6_select 0x00040000

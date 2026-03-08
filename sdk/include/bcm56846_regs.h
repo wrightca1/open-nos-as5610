@@ -13,9 +13,12 @@
  * CMC2 layout: CTRL = CMC2_BASE + 0x0 = 0x33000
  *              MSG0 = CMC2_BASE + 0xc = 0x3300c (through MSG20=0x33060)
  *
- * NOTE: After warm reboot from Cumulus, CMC2 is in ring-buffer DMA mode
- *   and 0x33000 is non-writable from PCIe.  PIO SCHAN requires a cold
- *   power-cycle of the switch to reset the BCM56846 to PIO mode.
+ * NOTE: After warm reboot from Cumulus, CMC2 is locked in SCHAN DMA ring-buffer
+ *   mode.  In this mode, 0x33000 (SCHAN_CTRL) reads 0x92 and MSG registers
+ *   (0x3300c+) are not directly writable.  All PIO SCHAN operations silently
+ *   fail.  A cold VDD power cycle (unplug cables 30+ sec) restores PIO mode.
+ *   After cold boot, SCHAN_CTRL reads 0x00 and PIO SCHAN works normally.
+ *   (See SCHAN_DISCOVERY_REPORT.md for definitive hardware analysis.)
  */
 #define CMIC_CMC0_SCHAN_CTRL      0x33000u   /* CMC2 SCHAN_CTRL (= CMC2_BASE + 0x0) */
 #define CMIC_CMC0_SCHAN_MSG(n)    (0x3300cu + (n) * 4u)  /* CMC2 MSG0..MSG20 */
@@ -30,26 +33,23 @@
 /*
  * CMIC diagnostic and boot-detection registers.
  *
- * BCM56846 hardware power-on defaults (confirmed after cold power cycle 2026-03-05):
- *   BAR0+0x10c = 0x32000043  SCHAN DMA ring config (HW default, NOT Cumulus state)
- *   BAR0+0x148 = 0x80000000  CMIC_DMA_CFG (HW default, DO NOT WRITE)
- *   BAR0+0x400 = 0x505b8d80  SCHAN DMA ring head pointer (HW default)
- * These values are always present after power-on and do NOT indicate that
- * DMA ring mode is active.  They were previously misidentified as persisted
- * Cumulus DMA ring state.
+ * BCM56846 register values after cold VDD power cycle:
+ *   BAR0+0x10c  = 0x00000000  SCHAN ring cfg (0 = PIO mode)
+ *   BAR0+0x148  = 0x80000000  CMIC_DMA_CFG (DO NOT WRITE — writing 0 breaks SCHAN)
+ *   BAR0+0x400  = 0x505b8d80  SCHAN DMA ring head pointer (HW default)
+ *   BAR0+0x33000 = 0x00000000  SCHAN_CTRL — PIO mode idle
  *
- * CMIC_DMA_CFG (BAR0+0x148):
- *   Reads 0x80000000 as hardware default.  Writing 0 DISABLES SCHAN PIO
- *   entirely (confirmed 2026-03-04).  DO NOT write to this register.
+ * After warm reboot from Cumulus (DMA ring mode persists):
+ *   BAR0+0x10c  = 0x32000043  SCHAN DMA ring config (non-zero = DMA ring mode)
+ *   BAR0+0x33000 = 0x00000092  SCHAN_CTRL — stuck in ring-buffer mode
+ *   MSG registers (0x3300c+) are not directly writable, PIO SCHAN fails.
+ *   Software reboot does NOT exit DMA ring mode — cold power cycle required.
  *
  * CMIC_DMA_RING_ADDR (BAR0+0x158):
- *   The ONLY reliable warm/cold boot discriminator:
- *   Non-zero = Cumulus wrote its ring buffer PA here (warm boot).
- *   Zero = cold boot (P2020 PCIe PERST_N clears this on every reboot).
+ *   Cleared by P2020 PCIe PERST_N on every reboot (unreliable for detection).
  *
- * CMIC_SCHAN_RING_CFG (BAR0+0x10c) and CMIC_SCHAN_RING_HEAD (BAR0+0x400):
- *   Read-only diagnostics.  HW defaults 0x32000043 and 0x505b8d80.
- *   Logged by chip_init and nos_bde_probe for debug purposes.
+ * Definitive PIO mode check: write 0x5A5A0000 to 0x3300c, read back.
+ *   Match = PIO mode; mismatch = DMA ring mode.
  */
 #define CMIC_DMA_CFG              0x0148u   /* DO NOT WRITE (HW default 0x80000000) */
 #define CMIC_DMA_CFG_ENABLE       (1u << 31) /* tentative; writing 0 breaks SCHAN */
@@ -75,23 +75,20 @@
  * These configure the CMIC's knowledge of which ASIC sub-block is on which
  * S-bus ring.  They must be written before any S-Channel operation.
  *
- * Offsets confirmed from OpenBCM SDK-6.5.16 src/soc/mcm/allregs_c.i,
- * entry SOC_REG_INT_CMIC_SBUS_RING_MAP_0_BCM56840_A0r (soc_cpureg type,
- * offset 0x204) and consecutive entries for maps 1-7 at 0x208..0x220.
- * CMIC_SBUS_TIMEOUT is the register immediately before map 0, at 0x200.
- * BCM56840_B0 (and BCM56846) share these offsets.
+ * CORRECTED 2026-03-06: Ring maps start at 0x0204 (NOT 0x0200).
+ * 0x0200 is CMIC_SBUS_TIMEOUT — definitively verified by experiment:
+ *   - Writing ring map value (0x43052100) to 0x200 causes ALL blocks to
+ *     HANG (value interpreted as ~1 billion cycle SBUS timeout).
+ *   - Writing 0x7D0 (2000 cycles) to 0x200 and ring maps at 0x204+ works.
+ *   - Cumulus works because SDK `init all` overwrites maps at correct offset.
  *
- * Values confirmed from Cumulus switchd binary strings (libopennsl.so.1
- * RE extract, strings-hex-literals.txt) built for AS5610-52X/BCM56846:
+ * Values from Cumulus switchd RE strings:
  *   "Map of S-bus agents (0 to 7) ... User should write: 0x43052100"
  *   "Map of S-bus agents (8 to 15) ... User should write: 0x33333343"
  *   "Map of S-bus agents (16 to 23) ... User should write: 0x44444333"
  *   "Map of S-bus agents (24 to 31) ... User should write: 0x00034444"
- *   (agents 32-63: all zeros — no S-bus agents in that range for BCM56846)
  */
-#define CMIC_SBUS_TIMEOUT         0x0200u   /* S-bus operation timeout     */
-#define CMIC_SBUS_TIMEOUT_VAL     0x7d0u    /* 2000 S-bus cycles           */
-
+#define CMIC_SBUS_TIMEOUT         0x0200u   /* SBUS timeout (cycles)       */
 #define CMIC_SBUS_RING_MAP_0      0x0204u   /* Agents  0- 7 ring mapping   */
 #define CMIC_SBUS_RING_MAP_1      0x0208u   /* Agents  8-15 ring mapping   */
 #define CMIC_SBUS_RING_MAP_2      0x020cu   /* Agents 16-23 ring mapping   */

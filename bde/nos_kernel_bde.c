@@ -21,88 +21,82 @@
 #define BAR0_SIZE	(256 * 1024)
 #define DMA_POOL_SIZE	(4 * 1024 * 1024)	/* max order-10 alloc on PPC32/mpc85xx */
 
-/* CMICm offsets from BAR0 (RE: ASIC_INIT_AND_DMA_MAP, SCHAN_AND_RING_BUFFERS) */
+/* CMICm DMA offsets (unused for now, retained for future DMA support) */
 #define CMICM_DMA_CTRL(ch)    (0x31140 + 4 * (ch))
 #define CMICM_DMA_DESC0(ch)   (0x31158 + 4 * (ch))
 #define CMICM_DMA_STAT        0x31150
-/*
- * S-Channel PIO — CMC2 is the channel libopennsl uses on BCM56846.
- *
- * Confirmed from hardware BAR0 register dump and libopennsl binary strings:
- *   "S-bus PIO Message Register Set; PCI offset from: 0x3300c to: 0x33060"
- *   SCHAN_CTRL at 0x33000 (CMC2_BASE + 0x0)
- *   SCHAN_MSG  at 0x3300c (CMC2_BASE + 0x00c, through 0x33060 = MSG20)
- *
- * The switchd binary contains 4 MSG sets (0x3100c/CMC0, 0x3200c/CMC1,
- * 0x3300c/CMC2, 0x1000c/alias).  libopennsl uses the 0x3300c set = CMC2.
- *
- * COLD-BOOT SCHAN STATE (confirmed experimentally):
- *   After a hard power cycle / reboot, SCHAN_CTRL may contain stale
- *   error state (0x65, 0x77, etc.) from the hardware power-on self-test.
- *   Cold-boot indicator: BAR0+0x158 (DMA_RING_ADDR) = 0x00000000.
- *   BAR0+0x148 reads 0x80000000 as the HARDWARE POWER-ON DEFAULT.
- *
- *   HARDWARE POWER-ON DEFAULTS (NOT DMA mode indicators):
- *     BAR0+0x10c = 0x32000043  (SCHAN DMA ring config — always present)
- *     BAR0+0x400 = 0x505b8d80  (SCHAN DMA ring head — always present)
- *   These values were previously misidentified as Cumulus DMA ring state.
- *   They are hardware defaults that exist after cold power cycle.
- *
- *   IMPORTANT: DO NOT write 0 to BAR0+0x148.  Hardware test 2026-03-04
- *   confirmed: writing 0 to BAR0+0x148 disables SCHAN PIO entirely.
- *   Its bit31 function is unknown but must remain set for SCHAN to work.
- *
- *   After bcm56846_chip_init() programs SBUS_TIMEOUT (0x200) and SBUS ring
- *   maps (0x204-0x220), SCHAN PIO operations complete via BDE ioctl:
- *     - SCHAN ops to TOP/accessible regs: ctrl=0x00000002 (DONE, no error)
- *     - SCHAN ops to XLPORT (in soft reset): ctrl=0x00000077 (ABORT+NACK)
- *       This is the expected ERROR_ABORT response from blocks in reset.
- *     - SCHAN_CTRL (0x33000) responds to START/ABORT.
- *
- *   IMPORTANT — CONCURRENT ACCESS:
- *   nos_bde_schan_op() is serialized by schan_mutex.  Without the mutex,
- *   concurrent callers (e.g. nos-switchd link_state_thread + user tests)
- *   corrupt each other's MSG register writes and CTRL polls, causing spurious
- *   ETIMEDOUT returns.
- *
- * WARM-BOOT (soft reboot from Cumulus) — NON-FUNCTIONAL:
- *   After warm reboot from Cumulus, the BCM56846 CMICm remains in
- *   SCHAN ring-buffer DMA mode (Cumulus driver configures this; state
- *   persists through warm reset).
- *
- *   Warm-boot indicator: BAR0+0x158 (DMA_RING_ADDR) = 0x0294ffd0 (or
- *   other non-zero PA = Cumulus ring buffer PA).
- *
- *   PCI reset methods DO NOT help:
- *     - FLR (Function Level Reset): NOT supported by BCM56846
- *       (Device Capabilities register bit 28 = 0)
- *     - PCIe secondary bus reset via bridge: causes momentary link loss
- *       but CMIC internal state is NOT cleared (ring maps persist).
- *
- *   Fix: cold power-cycle the switch.
- *
- * TODO: add warm-boot detection in nos_bde_probe():
- *   if (readl(bar0 + 0x158) != 0) warn that cold power-cycle is required.
- */
-#define CMIC_CMC0_SCHAN_CTRL  0x33000
-#define CMIC_CMC0_SCHAN_MSG(n)  (0x3300c + (n) * 4)
-#define SCHAN_MAX_MSG_WORDS     21
 
-/* CMIC_CMC0_SCHAN_CTRL bit fields (CMICm spec) */
-#define SCHAN_CTRL_START        (1u << 0)
-#define SCHAN_CTRL_DONE         (1u << 1)
-#define SCHAN_CTRL_ABORT        (1u << 2)   /* write 1 to abort stale op; also ERROR_ABORT when set by HW */
-#define SCHAN_CTRL_NACK         (1u << 3)   /* HW sets on SBUS NACK (agent not present, block in reset) */
-#define SCHAN_CTRL_ERR_MASK     ((1u << 2) | (1u << 3))  /* ERROR_ABORT + NACK */
 /*
- * SCHAN completion mask: exit poll on DONE *or* any error bit.
- * CMICm sets DONE=1 on success; on SBUS timeout/NACK it may only set
- * NACK (bit 3) without DONE (bit 1).  Polling only for DONE causes a
- * full 50ms wait on every failed command.  Exit on any completion signal.
+ * S-Channel PIO — CMICe interface on BCM56846 (Trident+, pre-iProc).
+ *
+ * The BCM56846 has a transitional CMIC that exposes CMICm-style register
+ * addresses (0x31000+, 0x33000+) but they are NOT functional for PIO.
+ * The working SCHAN interface uses legacy CMICe registers:
+ *
+ *   SCHAN_CTRL = BAR0 + 0x0050  (CMICe byte-write format)
+ *   SCHAN_D(n) = BAR0 + n*4     (n=0..21, overlaps CMIC reg space 0x0000-0x0054)
+ *
+ * CMICe byte-write format for SCHAN_CTRL:
+ *   Write (0x80 | bit_num) to SET a bit in the register.
+ *   Write (0x00 | bit_num) to CLR a bit in the register.
+ *   Read returns the full 32-bit register value.
+ *
+ * SCHAN_CTRL status bits (read):
+ *   bit 0  = START (host-asserted)
+ *   bit 1  = DONE (set by HW on completion)
+ *   bit 2  = ABORT
+ *   bit 22 = SBUS TIMEOUT
+ *   bit 21 = SBUS NAK
+ *
+ * SCHAN response header at SCHAN_D(0):
+ *   bit 6  = ERR (SBUS target error)
+ *   bit 0  = NACK
+ *
+ * IMPORTANT: SCHAN_D(0..20) overlaps CMIC register space 0x0000-0x0050.
+ * A SCHAN response overwrites 0x0000..0x0004 (for 4-byte reads).
+ * MISC_CONTROL (0x1C) is SCHAN_D(7) but is safe for <= 7-word responses.
+ * SCHAN_CTRL (0x50) is SCHAN_D(20) — never overwritten by normal ops.
+ *
+ * Confirmed experimentally 2026-03-06:
+ *   - CMC2 (0x33000) returns 0x80 for reads, MSG not writable — non-functional
+ *   - CMICe SCHAN at 0x50 works: all 64 SBUS blocks respond after chip reset
+ *   - Write/read verified: wrote 0xDEADBEEF to blk 10, read back matched
  */
-#define SCHAN_CTRL_COMPLETE     (SCHAN_CTRL_DONE | SCHAN_CTRL_ERR_MASK)
+#define CMICE_SCHAN_CTRL      0x0050
+#define CMICE_SCHAN_D(n)      ((n) * 4)   /* n=0..21 */
+#define SCHAN_MAX_MSG_WORDS   21
 
-#define SCHAN_POLL_MS    50   /* 50ms: SBUS_TIMEOUT=2000 cyc (~10us), 50ms >> enough */
+/* CMICe byte-write values for SCHAN_CTRL */
+#define CMICE_SET_START       0x80u   /* SET bit 0 */
+#define CMICE_SET_ABORT       0x82u   /* SET bit 2 */
+#define CMICE_CLR_START       0x00u   /* CLR bit 0 */
+#define CMICE_CLR_DONE        0x01u   /* CLR bit 1 */
+#define CMICE_CLR_ABORT       0x02u   /* CLR bit 2 */
+#define CMICE_CLR_SER         0x14u   /* CLR bit 20 */
+#define CMICE_CLR_NAK         0x15u   /* CLR bit 21 */
+#define CMICE_CLR_TIMEOUT     0x16u   /* CLR bit 22 */
+
+/* SCHAN_CTRL read-back bits */
+#define SCHAN_CTRL_DONE       (1u << 1)
+#define SCHAN_CTRL_TIMEOUT    (1u << 22)
+#define SCHAN_CTRL_NAK        (1u << 21)
+
+/* SCHAN response header bits (in SCHAN_D(0)) */
+#define SCHAN_RESP_ERR        (1u << 6)
+#define SCHAN_RESP_NACK       (1u << 0)
+
+#define SCHAN_POLL_MS         50
+
+/* Chip reset registers */
+#define CMIC_CONFIG           0x010C
+#define CMIC_SOFT_RESET       0x0580
+#define CMIC_SOFT_RESET_2     0x057C
+#define CMIC_MISC_CONTROL     0x001C
+#define CMIC_SBUS_TIMEOUT     0x0200
+#define CMIC_SBUS_RING_MAP_0  0x0204
+#define CMIC_SBUS_RING_MAP_1  0x0208
+#define CMIC_SBUS_RING_MAP_2  0x020C
+#define CMIC_SBUS_RING_MAP_3  0x0210
 
 struct nos_bde_priv {
 	struct pci_dev *pdev;
@@ -128,6 +122,105 @@ static irqreturn_t nos_bde_irq(int irq, void *dev_id)
 	(void)dev_id;
 	/* TODO: read CMIC_CMCx_IRQ_STAT0, clear, wake S-Channel waiters */
 	return IRQ_NONE;
+}
+
+/*
+ * CMICe SCHAN abort: clear all stale state using byte-write protocol.
+ * Each write sets or clears exactly one bit in the 32-bit SCHAN_CTRL register.
+ */
+static void cmice_schan_abort(void __iomem *bar0)
+{
+	iowrite32(CMICE_SET_ABORT, bar0 + CMICE_SCHAN_CTRL);
+	udelay(100);
+	iowrite32(CMICE_CLR_ABORT, bar0 + CMICE_SCHAN_CTRL);
+	iowrite32(CMICE_CLR_START, bar0 + CMICE_SCHAN_CTRL);
+	iowrite32(CMICE_CLR_DONE,  bar0 + CMICE_SCHAN_CTRL);
+	iowrite32(CMICE_CLR_SER,   bar0 + CMICE_SCHAN_CTRL);
+	iowrite32(CMICE_CLR_NAK,   bar0 + CMICE_SCHAN_CTRL);
+	iowrite32(CMICE_CLR_TIMEOUT, bar0 + CMICE_SCHAN_CTRL);
+}
+
+/*
+ * BCM56846 chip reset sequence.
+ * Derived from OpenMDK bcm56840_a0_bmd_reset.c and experimental verification.
+ *
+ * CRITICAL ordering requirements (verified 2026-03-06):
+ *   - SBUS timeout and ring maps MUST be programmed BEFORE releasing
+ *     MMU/IP/EP from reset. If MMU comes out of reset before ring maps
+ *     are configured, the SBUS agent enters a permanent error state
+ *     (err=1 on all SCHAN ops) that persists across software resets
+ *     and requires a cold VDD power cycle to clear.
+ *   - Ring maps start at 0x0204 (NOT 0x0200). 0x0200 is CMIC_SBUS_TIMEOUT.
+ *     Verified experimentally: writing ring map data to 0x200 causes all
+ *     blocks to HANG (huge timeout value interpreted as timeout register).
+ *
+ * Sequence:
+ *   1. CPS reset via CMIC_CONFIG bit 5
+ *   2. CMIC_SOFT_RESET = 0 (all blocks in reset)
+ *   3. SBUS timeout at 0x0200, ring maps at 0x0204-0x0210
+ *   4. Progressive release: PLLs -> PLL-post -> PGs+TempMon
+ *   5. CMIC_SOFT_RESET_2 (XQ arbiter release)
+ *   6. Release IP/EP/MMU LAST (0xFFFF)
+ *   7. MISC_CONTROL bit 0 (SCHAN enable) + SCHAN abort
+ */
+static void bcm56846_chip_reset(void __iomem *bar0)
+{
+	u32 val;
+
+	/* Step 1: CPS Reset — toggle bit 5 of CMIC_CONFIG */
+	val = ioread32(bar0 + CMIC_CONFIG);
+	iowrite32(val | (1u << 5), bar0 + CMIC_CONFIG);
+	mdelay(1);
+	iowrite32(val & ~(1u << 5), bar0 + CMIC_CONFIG);
+	mdelay(10);
+
+	/* Step 2: All blocks in reset */
+	iowrite32(0x00000000, bar0 + CMIC_SOFT_RESET);
+	mdelay(50);
+
+	/*
+	 * Step 3: SBUS timeout + ring maps BEFORE any blocks leave reset.
+	 *
+	 * Ring map nibble values: ring 0=CMIC, 1=IPIPE, 2=MMU, 3=EPIPE,
+	 * 4=XLPORT, 5=CLPORT. Agent-to-ring mapping from CDK:
+	 *   agents  0-7:  0x43052100 (CMIC,IPIPE,MMU,EPIPE,PG,CMIC,PG,EPIPE)
+	 *   agents  8-15: 0x33333343 (EPIPE*6,PG,EPIPE)
+	 *   agents 16-23: 0x44444333 (XLPORT*5,EPIPE*3)
+	 *   agents 24-31: 0x00034444 (0,0,MMU,XLPORT*4)
+	 */
+	iowrite32(0x000007D0, bar0 + CMIC_SBUS_TIMEOUT);   /* 2000 cycles */
+	iowrite32(0x43052100, bar0 + CMIC_SBUS_RING_MAP_0); /* agents  0-7  */
+	iowrite32(0x33333343, bar0 + CMIC_SBUS_RING_MAP_1); /* agents  8-15 */
+	iowrite32(0x44444333, bar0 + CMIC_SBUS_RING_MAP_2); /* agents 16-23 */
+	iowrite32(0x00034444, bar0 + CMIC_SBUS_RING_MAP_3); /* agents 24-31 */
+
+	/* Step 4: Progressive release — PLLs first, then port groups */
+	iowrite32(0x00000780, bar0 + CMIC_SOFT_RESET);	/* PLLs out of reset */
+	mdelay(100);
+	iowrite32(0x0000F780, bar0 + CMIC_SOFT_RESET);	/* PLL post-dividers */
+	mdelay(50);
+	iowrite32(0x0000FF8F, bar0 + CMIC_SOFT_RESET);	/* PGs + temp monitor */
+	mdelay(50);
+
+	/* Step 5: CMIC_SOFT_RESET_2 — XQ arbiter release */
+	iowrite32(0x0000007F, bar0 + CMIC_SOFT_RESET_2);
+	mdelay(10);
+
+	/* Step 6: Release IP/EP/MMU LAST — bits 4(MMU), 5(IP), 6(EP) */
+	iowrite32(0x0000FFFF, bar0 + CMIC_SOFT_RESET);
+	mdelay(100);
+
+	/* Step 7: MISC_CONTROL bit 0 — enable SCHAN */
+	val = ioread32(bar0 + CMIC_MISC_CONTROL);
+	iowrite32(val | 1u, bar0 + CMIC_MISC_CONTROL);
+
+	/* Abort any stale SCHAN op */
+	cmice_schan_abort(bar0);
+
+	pr_info("nos-bde: chip reset complete"
+		" SOFT_RESET=0x%08x CTRL=0x%08x\n",
+		ioread32(bar0 + CMIC_SOFT_RESET),
+		ioread32(bar0 + CMICE_SCHAN_CTRL));
 }
 
 static int nos_bde_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -175,53 +268,8 @@ static int nos_bde_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pr_info("nos-kernel-bde: BCM56846 at %pR, BAR0 %p, DMA %pad size %zu\n",
 		&pdev->resource[0], priv->bar0, &priv->dma_pbase, priv->dma_size);
 
-	/*
-	 * SCHAN diagnostics and PIO initialization.
-	 *
-	 * Log key CMICm registers to help diagnose SCHAN mode (PIO vs DMA).
-	 * Then attempt to clear stale SCHAN state so PIO is ready before
-	 * any userspace SCHAN_OP ioctl.
-	 *
-	 * Hardware power-on defaults (NOT indicators of DMA ring mode):
-	 *   0x10c = 0x32000043 (SCHAN DMA ring config)
-	 *   0x400 = 0x505b8d80 (SCHAN DMA ring head pointer)
-	 *   0x148 = 0x80000000 (CMIC_DMA_CFG — DO NOT WRITE)
-	 *
-	 * Cumulus warm-boot indicator:
-	 *   0x158 = non-zero (Cumulus ring buffer PA, e.g. 0x0294ffd0)
-	 *   0x158 = 0 after cold boot (PERST_N clears this)
-	 */
-	{
-		void __iomem *bar0 = priv->bar0;
-		u32 schan_ctrl, ring_cfg, ring_addr, ring_head, dma_cfg;
-
-		schan_ctrl = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
-		ring_cfg   = ioread32(bar0 + 0x10c);
-		ring_addr  = ioread32(bar0 + 0x158);
-		ring_head  = ioread32(bar0 + 0x400);
-		dma_cfg    = ioread32(bar0 + 0x148);
-
-		pr_info("nos-bde: SCHAN diag: ctrl=0x%08x ring_cfg=0x%08x"
-			" ring_addr=0x%08x ring_head=0x%08x dma_cfg=0x%08x\n",
-			schan_ctrl, ring_cfg, ring_addr, ring_head, dma_cfg);
-
-		/* Attempt PIO SCHAN clear: abort stale ops + W1C all errors */
-		if (schan_ctrl != 0) {
-			u32 cleared;
-			iowrite32(0xFEu, bar0 + CMIC_CMC0_SCHAN_CTRL);
-			mdelay(10);
-			cleared = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
-			if (cleared == 0)
-				pr_info("nos-bde: SCHAN PIO cleared OK"
-					" (was 0x%08x, now 0x00)\n", schan_ctrl);
-			else
-				pr_warn("nos-bde: SCHAN PIO clear incomplete"
-					" (was 0x%08x, now 0x%08x)\n",
-					schan_ctrl, cleared);
-		} else {
-			pr_info("nos-bde: SCHAN_CTRL already 0x00 -- PIO ready\n");
-		}
-	}
+	/* Full BCM56846 chip reset: CPS, soft-reset, ring maps, SCHAN clear */
+	bcm56846_chip_reset(priv->bar0);
 
 	return 0;
 
@@ -289,32 +337,29 @@ size_t nos_bde_get_dma_size(void)
 EXPORT_SYMBOL(nos_bde_get_dma_size);
 
 /*
- * S-Channel PIO op via SCHAN_MSG registers (CMICm protocol).
+ * S-Channel PIO op via CMICe interface on BCM56846 (Trident+).
  *
  * Protocol:
- *   1. Write cmd[0..cmd_words-1] to CMIC_CMC0_SCHAN_MSG(0..cmd_words-1).
- *   2. Write data[0..data_words-1] to CMIC_CMC0_SCHAN_MSG(cmd_words..).
- *   3. Write SCHAN_CTRL_START to CMIC_CMC0_SCHAN_CTRL.
- *   4. Poll CMIC_CMC0_SCHAN_CTRL for SCHAN_CTRL_DONE.
- *   5. Clear SCHAN_CTRL (write 0).
- *   6. Read result from CMIC_CMC0_SCHAN_MSG(0..data_words-1).
+ *   1. Abort any stale SCHAN state (byte-write SET/CLR on SCHAN_CTRL at 0x50).
+ *   2. Write cmd[0..cmd_words-1] to SCHAN_D(0..cmd_words-1) at BAR0+0x0000.
+ *   3. Write data[0..data_words-1] to SCHAN_D(cmd_words..) (for write ops).
+ *   4. Write CMICE_SET_START (0x80) to SCHAN_CTRL to trigger the operation.
+ *   5. Poll SCHAN_CTRL for DONE bit (bit 1), check TIMEOUT/NAK.
+ *   6. Read response from SCHAN_D(0..data_words-1).
  *
- * SCHAN_MSG base address 0x3300c confirmed from Broadcom binary:
- *   "S-bus PIO Message Register Set; PCI offset from: 0x3300c to: 0x33060"
+ * SCHAN_D registers at 0x0000 overlap CMIC config space (by design in CMICe).
+ * SCHAN_CTRL at 0x0050 = SCHAN_D(20) — never overwritten by normal ops.
  */
 int nos_bde_schan_op(const u32 *cmd, int cmd_words, u32 *data, int data_words, int *status)
 {
 	struct nos_bde_priv *p = bde_priv;
 	void __iomem *bar0;
-	int i, total, ret;
-	unsigned long timeout;
-	u32 ctrl;
+	int i;
+	unsigned long deadline;
+	u32 ctrl, saved_misc;
 
-	if (!p || cmd_words <= 0 || cmd_words > 8 || data_words < 0 || data_words > 16)
-		return -EINVAL;
-
-	total = cmd_words + data_words;
-	if (total > SCHAN_MAX_MSG_WORDS)
+	if (!p || cmd_words <= 0 || cmd_words > SCHAN_MAX_MSG_WORDS ||
+	    data_words < 0 || data_words > SCHAN_MAX_MSG_WORDS)
 		return -EINVAL;
 
 	if (mutex_lock_interruptible(&schan_mutex))
@@ -322,85 +367,75 @@ int nos_bde_schan_op(const u32 *cmd, int cmd_words, u32 *data, int data_words, i
 
 	bar0 = p->bar0;
 	*status = -1;
-	ret = 0;
 
 	/*
-	 * Clear any stale SCHAN state before issuing a new operation.
-	 *
-	 * CMICm SCHAN_CTRL error/status bits are W1C (write-1-to-clear); writing
-	 * 0 has no effect.  The ABORT bit (bit 2) triggers an in-flight op
-	 * abort when asserted by the host.
-	 *
-	 * If stale state is present, write 0xFE (bits 1-7, all except START=0):
-	 *   bit 2 (ABORT):   trigger abort of any pending SCHAN op.
-	 *   bits 1,3-7:      W1C clears DONE and all error/status flags.
-	 *
-	 * Do NOT use "ctrl | SCHAN_CTRL_ABORT" — if bit 2 is already 1 in ctrl
-	 * (hardware-set ERROR state, e.g. cold-boot 0x65), OR-ing adds nothing
-	 * and the abort is never re-triggered.  Writing a fixed 0xFE always
-	 * freshly asserts ABORT regardless of the current ctrl value.
+	 * Save MISC_CONTROL before SCHAN op.  SCHAN_D(7) at offset 0x1C
+	 * overlaps CMIC_MISC_CONTROL — SCHAN responses overwrite it,
+	 * clearing bit 0 (SCHAN enable) and breaking all subsequent ops.
 	 */
-	ctrl = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
-	if (ctrl != 0) {
-		unsigned long abort_timeout = jiffies + msecs_to_jiffies(20);
+	saved_misc = ioread32(bar0 + CMIC_MISC_CONTROL);
 
-		iowrite32(0xFEu, bar0 + CMIC_CMC0_SCHAN_CTRL);
-		while (time_before(jiffies, abort_timeout)) {
-			ctrl = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
-			if (ctrl == 0)
-				break;
-			usleep_range(50, 200);
-		}
-		iowrite32(0, bar0 + CMIC_CMC0_SCHAN_CTRL);
-	}
+	/* Abort any stale SCHAN state (CMICe byte-write protocol) */
+	ctrl = ioread32(bar0 + CMICE_SCHAN_CTRL);
+	if (ctrl != 0)
+		cmice_schan_abort(bar0);
 
-	/* Write command words to SCHAN_MSG FIFO */
+	/* Write command words to SCHAN_D(0..) */
 	for (i = 0; i < cmd_words; i++)
-		iowrite32(cmd[i], bar0 + CMIC_CMC0_SCHAN_MSG(i));
+		iowrite32(cmd[i], bar0 + CMICE_SCHAN_D(i));
 
-	/* Write data words (for write ops) */
-	if (data && data_words > 0)
-		for (i = 0; i < data_words; i++)
-			iowrite32(data[i], bar0 + CMIC_CMC0_SCHAN_MSG(cmd_words + i));
-
-	/* Protocol step 3: write 0 before START (clear any residual) */
-	iowrite32(0, bar0 + CMIC_CMC0_SCHAN_CTRL);
-
-	/* Protocol step 4: assert START to trigger operation */
-	iowrite32(SCHAN_CTRL_START, bar0 + CMIC_CMC0_SCHAN_CTRL);
-
-	/* Poll for completion: DONE or any error bit (NACK/ERROR_ABORT).
-	 * CMICm may set NACK without DONE on SBUS timeout (e.g. block in reset).
-	 * Exiting on SCHAN_CTRL_COMPLETE prevents 50ms stall per bad command.
+	/*
+	 * NOTE: No pre-write of data[] here.  In CMICe, SCHAN_D(n) at offset
+	 * n*4 overlaps CMIC config space (e.g. MISC_CONTROL at 0x1C = D(7)).
+	 * Writing data_words beyond cmd_words would clobber critical CMIC
+	 * registers before SCHAN starts.  For write ops, the caller must
+	 * include the data word in cmd[] (e.g. cmd_words=3 for WRITE_REGISTER:
+	 * cmd[0]=header, cmd[1]=address, cmd[2]=data_word).
 	 */
-	timeout = jiffies + msecs_to_jiffies(SCHAN_POLL_MS);
-	while (time_before(jiffies, timeout)) {
-		ctrl = ioread32(bar0 + CMIC_CMC0_SCHAN_CTRL);
-		if (ctrl & SCHAN_CTRL_COMPLETE) {
-			iowrite32(0, bar0 + CMIC_CMC0_SCHAN_CTRL);
-			if (ctrl & SCHAN_CTRL_ERR_MASK) {
+
+	/* Restore MISC_CONTROL after writing cmd words (cmd may have clobbered it) */
+	if (cmd_words > 7)
+		iowrite32(saved_misc, bar0 + CMIC_MISC_CONTROL);
+
+	/* Assert START via CMICe byte-write */
+	iowrite32(CMICE_SET_START, bar0 + CMICE_SCHAN_CTRL);
+
+	/* Poll for DONE (bit 1) */
+	deadline = jiffies + msecs_to_jiffies(SCHAN_POLL_MS);
+	while (time_before(jiffies, deadline)) {
+		ctrl = ioread32(bar0 + CMICE_SCHAN_CTRL);
+		if (ctrl & SCHAN_CTRL_DONE) {
+			if (ctrl & (SCHAN_CTRL_TIMEOUT | SCHAN_CTRL_NAK)) {
+				cmice_schan_abort(bar0);
+				/* Restore MISC_CONTROL after SCHAN response clobbered D regs */
+				iowrite32(saved_misc, bar0 + CMIC_MISC_CONTROL);
 				pr_warn_ratelimited(
 				    "nos-bde: SCHAN err ctrl=0x%08x cmd[0]=0x%08x addr=0x%08x\n",
 				    ctrl, cmd[0], cmd_words > 1 ? cmd[1] : 0);
 				*status = -EIO;
 			} else {
-				/* Read result back (for read ops) */
+				/* Read response from SCHAN_D before clearing state */
 				if (data && data_words > 0)
 					for (i = 0; i < data_words; i++)
-						data[i] = ioread32(bar0 + CMIC_CMC0_SCHAN_MSG(i));
+						data[i] = ioread32(bar0 + CMICE_SCHAN_D(i));
+				cmice_schan_abort(bar0);
+				/* Restore MISC_CONTROL after SCHAN response clobbered D regs */
+				iowrite32(saved_misc, bar0 + CMIC_MISC_CONTROL);
 				*status = 0;
 			}
 			goto out;
 		}
 		usleep_range(10, 50);
 	}
-	iowrite32(0, bar0 + CMIC_CMC0_SCHAN_CTRL);
+	cmice_schan_abort(bar0);
+	/* Restore MISC_CONTROL after timeout */
+	iowrite32(saved_misc, bar0 + CMIC_MISC_CONTROL);
 	pr_warn_ratelimited("nos-bde: SCHAN timeout cmd[0]=0x%08x addr=0x%08x ctrl=0x%08x\n",
 			    cmd[0], cmd_words > 1 ? cmd[1] : 0, ctrl);
 	*status = -ETIMEDOUT;
 out:
 	mutex_unlock(&schan_mutex);
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL(nos_bde_schan_op);
 

@@ -204,6 +204,8 @@ fi
 # --- Default NOS config ---
 mkdir -p "$STAGING/etc/nos"
 [ -f "$REPO_ROOT/etc/nos/config.bcm" ] && cp -f "$REPO_ROOT/etc/nos/config.bcm" "$STAGING/etc/nos/"
+[ -f "$REPO_ROOT/etc/nos/rc.soc" ] && cp -f "$REPO_ROOT/etc/nos/rc.soc" "$STAGING/etc/nos/"
+[ -f "$REPO_ROOT/etc/nos/rc.datapath_0" ] && cp -f "$REPO_ROOT/etc/nos/rc.datapath_0" "$STAGING/etc/nos/"
 if [ ! -f "$STAGING/etc/nos/ports.conf" ]; then
 	echo "# open-nos-as5610 default: 52 ports" > "$STAGING/etc/nos/ports.conf"
 	echo "swp1=10G" >> "$STAGING/etc/nos/ports.conf"

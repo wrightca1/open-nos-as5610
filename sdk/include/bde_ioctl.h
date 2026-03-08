@@ -9,7 +9,7 @@
 
 #define NOS_BDE_MAGIC 'B'
 #define NOS_BDE_READ_REG     _IOWR(NOS_BDE_MAGIC, 1, struct nos_bde_reg)
-#define NOS_BDE_WRITE_REG    _IOR(NOS_BDE_MAGIC, 2, struct nos_bde_reg)  /* _IOR matches compiled .ko */
+#define NOS_BDE_WRITE_REG    _IOR(NOS_BDE_MAGIC, 2, struct nos_bde_reg)
 #define NOS_BDE_GET_DMA_INFO _IOR(NOS_BDE_MAGIC, 3, struct nos_bde_dma_info)
 #define NOS_BDE_SCHAN_OP     _IOWR(NOS_BDE_MAGIC, 4, struct nos_bde_schan)
 

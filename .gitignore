@@ -27,3 +27,4 @@ boot/initramfs.cpio.gz
 .vscode/
 *.swp
 .DS_Store
+platform/platform-mgrd/platform-mgrd-bin

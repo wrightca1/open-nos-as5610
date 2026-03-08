@@ -7,6 +7,7 @@
 
 extern int bcm56846_config_load(const char *path);
 extern int bcm56846_soc_run(const char *script_path);
+extern int bcm56846_chip_init(int unit);
 
 
 static int attached;
@@ -43,6 +44,11 @@ int bcm56846_init(int unit, const char *config_path)
 		return -1;
 	if (bcm56846_config_load(config_path) < 0)
 		return -1; /* config.bcm load failed */
+
+	/* Always run chip init (SBUS ring maps, XLPORT reset deassert, SCHAN clear).
+	 * Previously this was only triggered by "init all" in rc.soc, but if rc.soc
+	 * is missing, chip_init never runs and SCHAN ops route to wrong blocks. */
+	bcm56846_chip_init(unit);
 
 	/* Run rc.soc and rc.datapath_0 if present (base = config_path without trailing /) */
 	dlen = strlen(config_path);
