@@ -71,13 +71,14 @@ The switch forwards packets in hardware (BCM56846 ASIC) with FRR handling routin
 
 | Directory | What it is | Status |
 |-----------|-----------|--------|
-| [`bde/`](bde/) | Our own BDE kernel modules (`nos-kernel-bde.ko`, `nos-user-bde.ko`) — PCI probe, BAR0 map, DMA pool, S-Channel transport | **Building** |
-| [`sdk/`](sdk/) | `libbcm56846` — custom SDK replacing Broadcom's proprietary SDK, written from RE data | **Building** (attach/schan/reg + stubs) |
-| [`switchd/`](switchd/) | `nos-switchd` — control plane daemon, netlink listener, TUN manager, packet I/O | **Skeleton** (attach/init) |
-| [`tests/`](tests/) | BDE validation test (`bde_validate`) — Phase 1d | **Building** |
-| [`platform/`](platform/) | `platform-mgrd` — CPLD, thermal, fans, PSU, SFP/QSFP | Planning |
-| [`rootfs/`](rootfs/) | Debian 12 (Bookworm) PPC32 rootfs — bootstrap scripts and package list | Planning |
-| [`onie-installer/`](onie-installer/) | ONIE-compatible NOS installer for the AS5610-52X | Planning |
+| [`bde/`](bde/) | Our own BDE kernel modules (`nos-kernel-bde.ko`, `nos-user-bde.ko`) — PCI probe, BAR0 map, DMA pool, S-Channel transport | **Working on HW** |
+| [`sdk/`](sdk/) | `libbcm56846` — custom SDK replacing Broadcom's proprietary SDK, written from RE data | **Working** (init, port, SerDes, L2, L3, ECMP, VLAN, pktio, stats) |
+| [`switchd/`](switchd/) | `nos-switchd` — control plane daemon, netlink listener, TUN manager, packet I/O | **Building** |
+| [`tests/`](tests/) | BDE validation test (`bde_validate`) — Phase 1d | **Passed on HW** |
+| [`platform/`](platform/) | `platform-mgrd` — CPLD, thermal, fans, PSU, SFP/QSFP | **Working on HW** |
+| [`rootfs/`](rootfs/) | Debian Jessie PPC32 rootfs — debootstrap + squashfs | **Working** |
+| [`onie-installer/`](onie-installer/) | ONIE-compatible NOS installer for the AS5610-52X | **Working** |
+| [`tools/`](tools/) | Diagnostic scripts (retimer init, SFP TX enable) + cmake toolchain | **Working** |
 
 See [STATUS.md](STATUS.md) for detailed build and implementation status.
 
@@ -99,7 +100,7 @@ Reused open-source components (installed as Debian packages):
 
 **No OpenNSL BDE.** We write our own BDE kernel modules from scratch. OpenNSL BDE has kernel version compatibility issues. With the full register map from RE, writing our own is straightforward and gives us complete control.
 
-**Debian userspace.** Debian 12 PPC32 provides a full apt ecosystem — FRR, iproute2, openssh all install from the standard archive. Our custom code (SDK, switchd, BDE) ships as versioned `.deb` packages.
+**Debian userspace.** Debian Jessie PPC32 (last Debian release with PowerPC support) provides an apt ecosystem — FRR, iproute2, openssh available. Our custom code (SDK, switchd, BDE) is installed directly into the rootfs.
 
 **Minimal SDK surface.** `libbcm56846` implements only what's needed: init, port bringup, L2/L3 table programming, ECMP, and packet I/O. No feature creep.
 
@@ -112,12 +113,13 @@ This project is in **active development**. The reverse engineering phase is comp
 Code phases:
 
 - [x] Phase 0 — Build environment (cross-toolchain, kernel, repo structure)
-- [x] Phase 1 — Kernel + BDE modules + validation test (DTB/initramfs/FIT scaffolding in place)
-- [x] Phase 2a — S-Channel and register access in libbcm56846; [ ] 2b–2g (init, port, L2, L3, pktio, VLAN)
-- [ ] Phase 3 — nos-switchd (TUN, netlink, link state polling, TX/RX)
-- [ ] Phase 4 — Routing protocol integration (FRR + ECMP)
-- [ ] Phase 5 — Platform management (CPLD, thermal, SFP)
-- [ ] Phase 6 — ONIE installer + A/B upgrade
+- [x] Phase 1 — Kernel + BDE modules + validation test (passed on HW)
+- [x] Phase 2 — libbcm56846 SDK (init, SCHAN, port, SerDes 10G, L2/L2_USER_ENTRY, L3/ECMP, VLAN, pktio, stats)
+- [x] Phase 3 — nos-switchd (TUN, netlink, link state polling, TX/RX)
+- [x] Phase 4 — FRR integration (installed from Debian packages)
+- [x] Phase 5 — Platform management (thermal, fans, PSU, SFP, CPLD watchdog)
+- [x] Phase 6 — ONIE installer (171MB .bin, boots on HW)
+- [ ] HW validation — SerDes link-up with external 10G peers, L2/L3 forwarding tests
 
 ---
 
@@ -131,34 +133,18 @@ apt-get install gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
                 squashfs-tools cmake
 ```
 
-### Kernel
+All building is done on the build server (10.22.1.5) inside a `debian:bookworm` Docker container for cross-compilation. Do NOT build on macOS.
+
+### Full build (kernel + BDE + SDK + rootfs + installer)
 
 ```bash
-make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- p2020rdb_defconfig
-# enable CONFIG_TUN, CONFIG_GIANFAR, CONFIG_I2C_MUX, CONFIG_HWMON
-make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- uImage modules
-```
-
-### BDE modules
-
-```bash
-make -C bde ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
-     KERNEL_SRC=/path/to/linux-5.10
-```
-
-### SDK + switchd
-
-```bash
-cmake -DCMAKE_TOOLCHAIN_FILE=tools/ppc32-toolchain.cmake -B build sdk/
-cmake --build build --target package
-# produces libbcm56846_*.deb, nos-switchd_*.deb
-```
-
-### Rootfs + installer
-
-```bash
-cd rootfs && ./bootstrap.sh    # debootstrap Debian 12 PPC32
-cd onie-installer && ./build.sh  # produces open-nos-as5610-YYYYMMDD.bin
+# On build server, inside docker:
+cd ~/open-nos-as5610
+BUILD_KERNEL=1 ./scripts/remote-build.sh           # Kernel + BDE + SDK
+IN_DOCKER=1 KERNEL_VERSION=5.10.0-nos \
+  KERNEL_SRC=/work/linux-5.10 rootfs/build.sh      # Rootfs
+boot/build-fit.sh                                   # FIT image
+onie-installer/build.sh                             # ONIE installer .bin
 ```
 
 ### Install on switch

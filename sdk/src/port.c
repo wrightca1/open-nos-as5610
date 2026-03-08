@@ -166,6 +166,13 @@ int bcm56846_port_link_status_get(int unit, int port, int *link_up)
 	*link_up = 0;
 	if (port <= 0 || port > 52)
 		return -EINVAL;
+
+	/* 10G SFP+ ports (49-52): use CL45 PCS link status via SerDes MDIO.
+	 * GP0 SYNC_STATUS_COMBO is always 0 with FIBER_MODE=1, so MAC_MODE
+	 * link status bit is unreliable for 10G SFI. */
+	if (port >= 49)
+		return bcm56846_serdes_link_get(unit, port, link_up);
+
 	if (xe_to_block_lane(xe, &base, &lane, &block_idx) != 0)
 		return -EINVAL;
 

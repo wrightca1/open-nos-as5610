@@ -66,9 +66,40 @@
 #define CMIC_MISC_CONTROL         0x001cu
 #define CMIC_MISC_CONTROL_LINK40G_ENABLE  (1u << 0)
 
-/* MIIM (MDIO) for SerDes */
-#define CMIC_MIIM_PARAM           0x00000230u   /* MDIO data/command parameter */
-#define CMIC_MIIM_ADDRESS         0x000004a0u
+/*
+ * MIIM (MDIO) for SerDes — CORRECTED register offsets.
+ *
+ * The old CMIC_MIIM_PARAM at 0x230 was wrong (from an older BCM chip variant).
+ * Correct offsets confirmed by hardware test on BCM56846_A1:
+ *
+ * MIIM read sequence:
+ *   1. Write 16 to MIIM_CTRL (reset read state)
+ *   2. Write 18 to MIIM_CTRL (clear done status)
+ *   3. Write (reg & 0x1F) to MIIM_ADDRESS
+ *   4. Write param to MIIM_PARAM (PHY | BUS_ID | INTERNAL_SEL)
+ *   5. Write 0x90 to MIIM_CTRL (trigger read)
+ *   6. Poll MIIM_CTRL bit 18 (done)
+ *   7. Read 16-bit data from MIIM_READ_DATA
+ *   8. Write 18 to MIIM_CTRL (clear done)
+ *
+ * MIIM write sequence:
+ *   1. Write 17 to MIIM_CTRL (reset write state)
+ *   2. Write 18 to MIIM_CTRL (clear done status)
+ *   3. Write (reg & 0x1F) to MIIM_ADDRESS
+ *   4. Write param to MIIM_PARAM (PHY | BUS_ID | INTERNAL_SEL | DATA[15:0])
+ *   5. Write 0x91 to MIIM_CTRL (trigger write)
+ *   6. Poll MIIM_CTRL bit 18 (done)
+ *   7. Write 18 to MIIM_CTRL (clear done)
+ */
+#define CMIC_MIIM_CTRL            0x00000050u   /* MIIM control/status */
+#define CMIC_MIIM_PARAM           0x00000158u   /* MDIO parameter (PHY/BUS/data) */
+#define CMIC_MIIM_ADDRESS         0x000004a0u   /* MDIO register address */
+#define CMIC_MIIM_READ_DATA       0x0000015cu   /* MDIO read data (16-bit) */
+#define CMIC_MIIM_CTRL_DONE       (1u << 18)    /* MIIM operation complete */
+
+/* MIIM clock divider — optional, sets MDIO bus clock speed */
+#define CMIC_MIIM_INT_SEL_MAP     0x000001bcu   /* internal MDIO divider */
+#define CMIC_MIIM_EXT_SEL_MAP     0x000001b8u   /* external MDIO divider */
 
 /*
  * CMIC_SBUS registers — direct BAR0 access (NOT S-Channel).

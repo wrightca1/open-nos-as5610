@@ -1,6 +1,6 @@
 # open-nos-as5610 — Build and Implementation Status
 
-**Last updated:** 2026-03-04
+**Last updated:** 2026-03-08
 
 ---
 
@@ -9,28 +9,28 @@
 | Area | Status | Notes |
 |------|--------|-------|
 | **Build system** | ✅ Working | Build server (Debian, PPC32 cross), kernel + BDE + SDK + switchd + platform-mgrd + tests |
-| **Phase 1 — Boot + BDE** | ✅ Implemented | Kernel 5.10.0-dirty, BDE modules, S-Channel, validation test |
+| **Phase 1 — Boot + BDE** | ✅ Implemented | Kernel 5.10.0-nos, BDE modules, S-Channel, validation test |
 | **Phase 2 — SDK** | 🟢 2a–2g + L2_USER_ENTRY | Config, SOC runner, S-Chan, L2 add/delete/get, L2_USER_ENTRY add/delete, L3/ECMP, VLAN, port+SerDes, pktio, stats. 40G + HW tests pending. |
 | **Phase 3 — nos-switchd** | 🟢 Core complete | Netlink→SDK for link/addr/route/neigh; link-state poll; TX/RX threads. Ready for HW/FRR test. |
 | **Phase 5 — Platform** | ✅ Complete | platform-mgrd: CPLD watchdog, thermal→fan PWM, PSU monitor, SFP EEPROM (sysfs + I2C fallback) |
 | **Phase 1a DTB/initramfs/FIT** | ✅ In place | initramfs/build.sh, boot/build-fit.sh, real Cumulus DTB (boot/as5610_52x.dtb) |
 | **Rootfs** | ✅ Debian Jessie PPC32 | rootfs/build.sh — jessie from archive.debian.org (last Debian with powerpc); glibc 2.19 + systemd 215 compatible with Linux 5.10 |
 | **ONIE installer .bin** | ✅ Produced | 171MB; all NOS binaries included (nos-switchd, libbcm56846.so, BDE .ko, platform-mgrd); served at http://10.22.1.4:8000/ |
-| **Hardware validation** | 🟡 In progress | SCHAN working; 52 swp TAP interfaces up; XLPORT reset de-assertion pending cold-boot test |
+| **Hardware validation** | 🟡 In progress | SCHAN, I2C, thermal, fans, CPLD all working. SerDes SIGDET confirmed on 3 PHYs. CL49 block lock pending (external peer). |
 
 ---
 
 ## What Builds Today
 
-- **Kernel:** Linux 5.10.0-dirty (mpc85xx_cds_defconfig + AS5610 patches), PPC32 uImage + modules
-  - eTSEC/gianfar (eth0, management), I2C chardev+mux+PCA954X (SFP buses i2c-22..i2c-73), AT24 EEPROM (SFP sysfs), LM75/LM90 hwmon, GPIO PCA953X
-- **BDE:** `nos_kernel_bde.ko`, `nos_user_bde.ko` — vermagic `5.10.0-dirty`; PCI probe, BAR0, 8MB DMA pool, S-Channel, ioctl READ_REG/WRITE_REG/GET_DMA_INFO/SCHAN_OP, mmap DMA
-- **SDK:** `libbcm56846.so` — attach/detach/init, config.bcm, SOC runner, schan write/read_memory, reg; **port** (enable, link, SerDes 10G); **L2** add/delete/get + **L2_USER_ENTRY** add/delete; **L3** intf/egress/route/host + **ECMP**; **VLAN**; **pktio** (TX/RX DCB21); **stats** (RPKT/RBYT/TPKT/TBYT).
+- **Kernel:** Linux 5.10.0-nos (mpc85xx_cds_defconfig + AS5610 patches), PPC32 uImage + modules
+  - eTSEC/gianfar (eth0, management), I2C MPC + PCA954x mux (70 buses), AT24 EEPROM (SFP sysfs), ADM1021/MAX6697 hwmon, GPIO PCA953x
+- **BDE:** `nos_kernel_bde.ko`, `nos_user_bde.ko` — vermagic `5.10.0-nos`; PCI probe, BAR0, 8MB DMA pool, S-Channel, ioctl READ_REG/WRITE_REG/GET_DMA_INFO/SCHAN_OP, mmap DMA
+- **SDK:** `libbcm56846.so` — attach/detach/init, config.bcm, SOC runner, schan write/read_memory, reg; **port** (enable, link, SerDes 10G via WARPcore MDIO + CL45 PCS link); **L2** add/delete/get + **L2_USER_ENTRY** add/delete; **L3** intf/egress/route/host + **ECMP**; **VLAN**; **pktio** (TX/RX DCB21); **stats** (RPKT/RBYT/TPKT/TBYT).
 - **nos-switchd:** PPC32 executable — attach, init, TUN creation, netlink (NEWLINK→port enable, NEWADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr), link-state poll, TX thread, RX callback→TUN write.
 - **platform-mgrd:** PPC32 executable — CPLD watchdog keepalive (15s), thermal→fan PWM (4 zones, 35/45/55°C), PSU presence/ok monitor, SFP EEPROM read (sysfs at24 + I2C fallback)
 - **Tests:** `bde_validate` — READ_REG(0), mmap DMA write/read, READ_REG(0x32800)
 
-**Build command:** `USE_BUILD_SERVER=modern BUILD_KERNEL=1 ./scripts/build-on-build-server.sh`
+**Build command:** `BUILD_KERNEL=1 ./scripts/remote-build.sh` (on build server 10.22.1.5, inside docker)
 **Artifacts:** See [BUILD.md](BUILD.md).
 
 ---
@@ -39,12 +39,12 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Kernel FIT (nos-powerpc.itb) | ✅ | 5.10.0-dirty, DTB (real Cumulus as5610_52x.dtb), initramfs |
+| Kernel FIT (nos-powerpc.itb) | ✅ | 5.10.0-nos, DTB (real Cumulus as5610_52x.dtb), initramfs |
 | Rootfs squashfs | ✅ | Debian jessie PPC32; xz-compressed |
 | nos-switchd | ✅ | In `/usr/sbin/nos-switchd` |
 | libbcm56846.so | ✅ | In `/usr/lib/libbcm56846.so` |
-| nos_kernel_bde.ko | ✅ | In `/lib/modules/5.10.0-dirty/` |
-| nos_user_bde.ko | ✅ | In `/lib/modules/5.10.0-dirty/` |
+| nos_kernel_bde.ko | ✅ | In `/lib/modules/5.10.0-nos/` |
+| nos_user_bde.ko | ✅ | In `/lib/modules/5.10.0-nos/` |
 | platform-mgrd | ✅ | In `/usr/sbin/platform-mgrd` |
 | systemd service units | ✅ | nos-bde-modules.service, nos-switchd.service, platform-mgrd.service |
 | config.bcm | ✅ | In `/etc/nos/config.bcm` (52 portmap entries) |
@@ -52,7 +52,7 @@
 | platform.conf | ✅ | accton_as5610_52x |
 | uboot_env | ✅ | cl.active, bootsource, cl.platform |
 | CPLD kernel driver | ⚠️ | No OSS driver yet; CPLD sysfs paths depend on running accton_as5610_52x_cpld.ko (from ONL or out-of-tree) |
-| Hardware boot test | ⏳ | Not yet run on physical switch |
+| Hardware boot test | ✅ | Boots on AS5610-52X via ONIE |
 
 ---
 
@@ -61,20 +61,23 @@
 | Step | Status | Notes |
 |------|--------|-------|
 | BDE modules load | ✅ | `nos_kernel_bde.ko` + `nos_user_bde.ko` load cleanly |
-| SCHAN PIO mode | ✅ | Cold power cycle; SCHAN_CTRL=0x00 after 0xFE abort clear |
+| SCHAN PIO mode | ✅ | Cold power cycle; CMICe SCHAN at BAR0+0x0050 |
 | SBUS ring map | ✅ | 0x204..0x220 programmed; ring map reads back 0x43052100/0x33333343 |
 | LINK40G_ENABLE | ✅ | 0x1c CMIC_MISC_CONTROL bit 0 set; required for XLMAC SBUS access |
+| I2C / thermal | ✅ | 70 buses, MAX1617+MAX6697 hwmon, SFP EEPROMs, PCA954x muxes |
+| CPLD / fans / PSU | ✅ | platform-mgrd: watchdog, thermal→PWM, PSU monitor |
 | 52 TAP interfaces | ✅ | swp1..swp52 as TUN/TAP; verified via `ip link show` |
-| XLPORT SCHAN reads | ⏳ | ERROR_ABORT — XLPORT blocks in soft reset; awaiting de-assertion |
-| TOP_SOFT_RESET_REG | ⏳ | SCHAN addr 0x28033200 (RE-confirmed); probed on next cold boot |
-| Port link | ⏳ | Pending XLPORT reset de-assertion |
-| L2/L3 forwarding | ⏳ | Pending port bring-up |
+| DS100DF410 retimer | ✅ | Unmuted; 3 SFPs with RX light → SIGDET on WARPcore PHYs 13,17,31 |
+| WARPcore MDIO | ✅ | MIIM CTRL=0x50, PARAM=0x158, ADDR=0x4A0; PRBS/HiGig2 cleared |
+| SerDes SIGDET | ✅ | SIGDET=0x1 on PHY 13,17,31 (MDIO bus 1) with SFP+ installed |
+| CL49 block lock | 🟡 | Works in IEEE loopback; external signal never achieves lock |
+| Port link (10G) | 🟡 | CL45 PCS link status implemented; pending valid 10G peer |
+| L2/L3 forwarding | ⏳ | Pending port link-up |
 
 **Warm-boot note**: CMC2 remains in DMA ring-buffer mode after warm reboot; PIO SCHAN requires
-cold hardware power cycle (unplug + replug). `init.c` detects this via `CMIC_DMA_RING_ADDR (0x158)`.
+cold hardware power cycle (unplug + replug).
 
-**NOS_BDE_WRITE_REG ioctl**: Source uses `_IOR` (not `_IOW`) to match the deployed `.ko` binary
-(discovered via `ENOTTY` on writes; confirmed by disassembly of deployed `nos_user_bde.ko`).
+**NOS_BDE_WRITE_REG ioctl**: Source uses `_IOR` (not `_IOW`) to match the deployed `.ko` binary.
 
 ---
 
@@ -82,12 +85,12 @@ cold hardware power cycle (unplug + replug). `init.c` detects this via `CMIC_DMA
 
 | Issue | Impact | Status |
 |-------|--------|--------|
-| BDE vermagic is `5.10.0-dirty` | Kernel and BDE .ko must be rebuilt together; stale .ko will fail `insmod` | Known; rebuild BDE whenever kernel is rebuilt (`BUILD_KERNEL=1`) |
-| CPLD sysfs driver | platform-mgrd opens `/sys/devices/ff705000.localbus/ea000000.cpld/…`; requires `accton_as5610_52x_cpld.ko` | Pending; driver from ONL tree or write minimal OSS CPLD driver |
-| SPE toolchain flags removed | `-mabi=spe -mspe -mfloat-gprs=double` not supported by `powerpc-linux-gnu-gcc` 12; only `-mcpu=8548` used | Fixed in `tools/ppc32-toolchain.cmake` |
-| jessie-updates mirror 404 | `archive.debian.org/debian-security` powerpc repo is missing; debootstrap errors on security suite | Non-fatal; security updates not available; production should use Void Linux (see PLAN.md §11.1) |
-| Debian jessie + kernel 5.10 | glibc 2.19 requires kernel ≥3.2; systemd 215 requires ≥3.10 | ✅ Confirmed compatible; Linux 5.10 satisfies both |
-| XLPORT blocks in soft reset | All SCHAN reads to XLPORT/XLMAC return ERROR_ABORT at cold boot | Fix: `bcm56846_xlport_deassert_reset()` in `init.c` probes `TOP_SOFT_RESET_REG` at `0x28033200` |
+| BDE vermagic `5.10.0-nos` | Kernel and BDE .ko must be rebuilt together; stale .ko will fail `insmod` | Known; rebuild BDE whenever kernel is rebuilt (`BUILD_KERNEL=1`) |
+| WRITE_REG ioctl direction | Deployed .ko uses `_IOR` (0x80084202); source has `_IOW` | Workaround in `bde_ioctl.c`; needs .ko rebuild |
+| CL49 block lock (external) | IEEE loopback works, but external 10G signal never achieves CL49 lock | Under investigation; remote end may not send valid 64B/66B |
+| Retimer CDR never locks | DS100DF410 CDR status bit4=0 on all channels despite signal | May not be in active signal path; needs further investigation |
+| fw_setenv not working | Cannot set U-Boot env from NOS (MTD/CFI modules not loading) | Trigger ONIE via boot_count or U-Boot console |
+| CPLD sysfs driver | platform-mgrd opens `/sys/devices/…/ea000000.cpld/`; requires CPLD .ko | Working with accton_as5610_52x_cpld.ko from ONL tree |
 
 ---
 

@@ -20,6 +20,8 @@ int bcm56846_port_speed_set(int unit, int port, int speed_mbps);
 int bcm56846_port_link_status_get(int unit, int port, int *link_up);
 /* SerDes (Warpcore WC-B0): 10G init; call after port enable for link. */
 int bcm56846_serdes_init_10g(int unit, int port);
+/* SerDes link status via CL45 PCS (devad 3, reg 1); used for 10G SFI. */
+int bcm56846_serdes_link_get(int unit, int port, int *link_up);
 
 /* L2 */
 int bcm56846_l2_addr_add(int unit, const bcm56846_l2_addr_t *addr);

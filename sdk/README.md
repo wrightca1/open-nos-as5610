@@ -26,10 +26,22 @@ int bcm56846_port_enable_set(int unit, int port, int enable);
 int bcm56846_port_speed_set(int unit, int port, int speed_mbps);
 int bcm56846_port_link_status_get(int unit, int port, int *link_up);
 
+/* SerDes (WARPcore WC-B0) */
+int bcm56846_serdes_init_10g(int unit, int port);       /* 10G SFI init */
+int bcm56846_serdes_link_get(int unit, int port, int *link_up); /* CL45 PCS link */
+
 /* L2 */
 int bcm56846_l2_addr_add(int unit, const bcm56846_l2_addr_t *addr);
 int bcm56846_l2_addr_delete(int unit, const uint8_t mac[6], uint16_t vid);
 int bcm56846_l2_addr_get(int unit, const uint8_t mac[6], uint16_t vid, bcm56846_l2_addr_t *out);
+
+/* L2 TCAM (L2_USER_ENTRY) */
+int bcm56846_l2_user_entry_add(int unit, const bcm56846_l2_user_addr_t *addr, int *index);
+int bcm56846_l2_user_entry_delete(int unit, int index);
+
+/* L3 Interface */
+int bcm56846_l3_intf_create(int unit, const uint8_t mac[6], uint16_t vid, int *intf_id);
+int bcm56846_l3_intf_destroy(int unit, int intf_id);
 
 /* L3 Egress */
 int bcm56846_l3_egress_create(int unit, const bcm56846_l3_egress_t *egress, int *egress_id);
@@ -41,13 +53,16 @@ int bcm56846_l3_route_delete(int unit, const bcm56846_l3_route_t *route);
 int bcm56846_l3_host_add(int unit, const bcm56846_l3_host_t *host);
 
 /* ECMP */
-int bcm56846_l3_ecmp_create(int unit, int egress_ids[], int count, int *ecmp_id);
+int bcm56846_l3_ecmp_create(int unit, const int *egress_ids, int count, int *ecmp_id);
 int bcm56846_l3_ecmp_destroy(int unit, int ecmp_id);
 
 /* VLAN */
 int bcm56846_vlan_create(int unit, uint16_t vid);
 int bcm56846_vlan_port_add(int unit, uint16_t vid, int port, int tagged);
 int bcm56846_vlan_destroy(int unit, uint16_t vid);
+
+/* Stats (XLMAC counters) */
+int bcm56846_stat_get(int unit, int port, bcm56846_stat_t stat, uint64_t *value);
 
 /* Packet I/O */
 int bcm56846_tx(int unit, int port, const void *pkt, int len);
@@ -62,19 +77,25 @@ int bcm56846_rx_stop(int unit);
 sdk/
 ├── include/
 │   ├── bcm56846.h          # Public API header
-│   ├── bcm56846_tables.h   # ASIC table definitions
-│   ├── bcm56846_regs.h     # Register offsets
-│   └── bcm56846_types.h    # Common types
+│   ├── bcm56846_regs.h     # CMIC/MIIM/SBUS register offsets (BAR0)
+│   ├── bcm56846_types.h    # Common types (L2, L3, stat enums)
+│   └── bde_ioctl.h         # BDE ioctl interface definitions
 └── src/
-    ├── init/       # attach, init, SOC script runner
-    ├── schan/      # S-Channel DMA write/read
-    ├── port/       # Port enable, XLPORT, SerDes (Warpcore WC-B0)
-    ├── l2/         # L2_ENTRY + L2_USER_ENTRY table programming
-    ├── l3/         # L3_DEFIP, nexthop chain programming
-    ├── ecmp/       # L3_ECMP + L3_ECMP_GROUP programming
-    ├── vlan/       # VLAN table programming
-    ├── pktio/      # DMA ring TX/RX + packet handling
-    └── stats/      # Counter reads
+    ├── attach.c    # Device attach (PCI, BAR0)
+    ├── bde_ioctl.c # BDE ioctl wrappers (read/write reg, schan_op)
+    ├── config.c    # config.bcm parser
+    ├── init.c      # ASIC init (SBUS ring map, XLPORT reset, LINK40G)
+    ├── soc.c       # SOC script runner (rc.soc replay)
+    ├── reg.c       # Register read/write helpers
+    ├── schan.c     # S-Channel PIO read/write memory
+    ├── port.c      # Port enable, XLPORT, link status
+    ├── serdes.c    # WARPcore WC-B0 SerDes (MIIM, AER, CL45, 10G SFI init)
+    ├── l2.c        # L2_ENTRY + L2_USER_ENTRY table programming
+    ├── l3.c        # L3 intf, egress, route, host
+    ├── ecmp.c      # L3_ECMP + L3_ECMP_GROUP
+    ├── vlan.c      # VLAN table programming
+    ├── pktio.c     # DMA ring TX/RX (DCB21)
+    └── stats.c     # XLMAC counter reads
 ```
 
 ## RE References (build order)
