@@ -4,17 +4,17 @@ Phase 4 of the plan requires FRR (BGP, OSPF, static routes) running on the switc
 
 ## Using Debian package (recommended)
 
-The rootfs build (`rootfs/build.sh`) installs FRR from the Debian Bookworm archive:
+The rootfs build (`rootfs/build.sh`) attempts to install FRR from the Debian jessie archive (note: FRR is not available in jessie, so this will fail and must be cross-compiled separately):
 
 ```bash
 chroot /mnt/rootfs apt-get install -y frr ifupdown2 lldpd
 ```
 
-Debian provides PPC32 packages for `frr`, so no cross-build is required when building the rootfs on an x86 host with `qemu-user-static`. The resulting rootfs will have `zebra`, `bgpd`, `ospfd`, etc. in `/usr/lib/frr/` or `/usr/sbin/`.
+Debian jessie does **not** have FRR packages (FRR postdates jessie). The `apt install frr` call in `build.sh` is expected to fail. FRR must be cross-compiled from source (see below).
 
 ## Building FRR from source (PPC32)
 
-If you need a specific FRR version or Debian package is unavailable:
+Since Debian jessie does not ship FRR, cross-compilation is required:
 
 1. Clone FRR: `git clone https://github.com/FRRouting/frr.git && cd frr`
 2. Install build deps (on build host): `apt-get install autoconf automake libtool make gcc-powerpc-linux-gnu libc6-dev-powerpc-cross libpam0g-dev libjson-c-dev libsystemd-dev`

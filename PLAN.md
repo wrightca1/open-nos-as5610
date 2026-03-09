@@ -1185,7 +1185,7 @@ make -C bde ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
 ```bash
 cd onie-installer && ./build.sh
 # Inputs:  uImage-powerpc.itb  (kernel FIT image)
-#          sysroot.squash.xz   (Debian 12 rootfs + our packages)
+#          sysroot.squash.xz   (Debian 8 jessie rootfs + our packages)
 # Output:  open-nos-as5610-YYYYMMDD.bin
 ```
 

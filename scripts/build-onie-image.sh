@@ -127,7 +127,7 @@ else
     [ ! -f "$REPO_ROOT/boot/nos-powerpc.itb" ] && err "FIT build failed (install u-boot-tools for mkimage or ensure build server has Docker)"
 fi
 
-# --- 5. Rootfs (Debian 12 Bookworm PPC32 per plan) ---
+# --- 5. Rootfs (Debian 8 Jessie PPC32) ---
 ROOTFS_SQUASH="${ROOTFS_SQUASH:-$REPO_ROOT/onie-installer/sysroot.squash.xz}"
 if [ -f "$ROOTFS_SQUASH" ]; then
     log "Using existing rootfs: $ROOTFS_SQUASH"
@@ -137,7 +137,7 @@ elif [ "$SKIP_ROOTFS" = "1" ]; then
 else
     # Try local rootfs build first (Linux with debootstrap, qemu-user-static, squashfs-tools)
     if command -v debootstrap &>/dev/null && { [ -x /usr/bin/qemu-ppc-static ] || [ -x /usr/bin/qemu-powerpc-static ]; }; then
-        log "Building rootfs locally (Debian bookworm PPC32)..."
+        log "Building rootfs locally (Debian jessie PPC32)..."
         ( cd "$REPO_ROOT/rootfs" && ./build.sh ) || true
     fi
     # If no rootfs yet, build on server in Docker (Debian jessie = last with PPC32; use archive.debian.org)
