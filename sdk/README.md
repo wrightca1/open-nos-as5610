@@ -71,6 +71,17 @@ int bcm56846_rx_start(int unit);
 int bcm56846_rx_stop(int unit);
 ```
 
+## SCHAN Transport Architecture
+
+All SDK modules use `sbus.h` for ASIC register and table access via S-Channel:
+
+- **`sbus_reg_read/write(addr, val)`** — 32-bit register access
+- **`sbus_reg_read64/write64(addr, data)`** — 64-bit register access (XMAC)
+- **`sbus_mem_read/write(base, index, words, nwords)`** — indexed table access (L2, L3, VLAN, ECMP, etc.)
+- **`cdk_port_addr(base, port)`** — compute per-port SBUS address from CDK base + port index
+
+The `sbus.c` layer constructs proper SCHAN headers (opcode, dstblk, datalen) and dispatches via the BDE kernel module's SCHAN_OP ioctl. This replaces the older `schan.c` which put raw addresses as SCHAN headers (broken).
+
 ## Directory Structure
 
 ```
@@ -79,23 +90,26 @@ sdk/
 │   ├── bcm56846.h          # Public API header
 │   ├── bcm56846_regs.h     # CMIC/MIIM/SBUS register offsets (BAR0)
 │   ├── bcm56846_types.h    # Common types (L2, L3, stat enums)
-│   └── bde_ioctl.h         # BDE ioctl interface definitions
+│   ├── bde_ioctl.h         # BDE ioctl interface definitions
+│   └── sbus.h              # SCHAN transport API (all modules use this)
 └── src/
-    ├── attach.c    # Device attach (PCI, BAR0)
-    ├── bde_ioctl.c # BDE ioctl wrappers (read/write reg, schan_op)
-    ├── config.c    # config.bcm parser
-    ├── init.c      # ASIC init (SBUS ring map, XLPORT reset, LINK40G)
-    ├── soc.c       # SOC script runner (rc.soc replay)
-    ├── reg.c       # Register read/write helpers
-    ├── schan.c     # S-Channel PIO read/write memory
-    ├── port.c      # Port enable, XLPORT, link status
-    ├── serdes.c    # WARPcore WC-B0 SerDes (MIIM, AER, CL45, 10G SFI init)
-    ├── l2.c        # L2_ENTRY + L2_USER_ENTRY table programming
-    ├── l3.c        # L3 intf, egress, route, host
-    ├── ecmp.c      # L3_ECMP + L3_ECMP_GROUP
-    ├── vlan.c      # VLAN table programming
-    ├── pktio.c     # DMA ring TX/RX (DCB21)
-    └── stats.c     # XLMAC counter reads
+    ├── attach.c        # Device attach (PCI, BAR0)
+    ├── bde_ioctl.c     # BDE ioctl wrappers (read/write reg, schan_op)
+    ├── config.c        # config.bcm parser
+    ├── init.c          # ASIC init (SBUS ring map, XLPORT reset, LINK40G)
+    ├── init_datapath.c # Full datapath init (8 phases: buffers→priority→hash→COS→THDO→sched→XMAC→VLAN)
+    ├── soc.c           # SOC script runner (rc.soc replay)
+    ├── sbus.c          # SCHAN transport (proper header construction, CDK addressing)
+    ├── schan.c         # Legacy S-Channel (deprecated — broken header format)
+    ├── reg.c           # Register read/write helpers
+    ├── port.c          # Port enable, XLPORT, link status (uses sbus.h)
+    ├── serdes.c        # WARPcore WC-B0 SerDes (MIIM, AER, CL45, 10G SFI init)
+    ├── l2.c            # L2_ENTRY + L2_USER_ENTRY table programming (uses sbus.h)
+    ├── l3.c            # L3 intf, egress, route, host (uses sbus.h)
+    ├── ecmp.c          # L3_ECMP + L3_ECMP_GROUP (uses sbus.h)
+    ├── vlan.c          # VLAN table programming (uses sbus.h)
+    ├── pktio.c         # DMA ring TX/RX (DCB21, CMICe at 0x100)
+    └── stats.c         # XLMAC counter reads (uses sbus.h)
 ```
 
 ## RE References (build order)

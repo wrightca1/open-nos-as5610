@@ -5,10 +5,9 @@
  * access register space on this ASIC.
  */
 #include "bcm56846.h"
+#include "sbus.h"
 #include <errno.h>
 #include <string.h>
-
-extern int schan_read_memory(int unit, uint32_t addr, uint32_t *data, int num_words);
 
 /* Block/lane map for xe0..xe51 (STATS_COUNTER_FORMAT §2). */
 struct xlport_stat {
@@ -74,8 +73,9 @@ int bcm56846_stat_get(int unit, int port, bcm56846_stat_t stat, uint64_t *value)
 	}
 	if (stat_reg_addr(port - 1, reg, &addr) != 0)
 		return -EINVAL;
+	(void)unit;
 	memset(words, 0, sizeof(words));
-	if (schan_read_memory(unit, addr, words, 2) != 0)
+	if (sbus_reg_read64(addr, words) != 0)
 		return -EIO;
 	*value = ((uint64_t)words[0] << 32) | words[1];
 	return 0;

@@ -145,6 +145,13 @@ DEBIAN_FRONTEND=noninteractive chroot "$STAGING" apt-get install -y -q \
 	python3-minimal ca-certificates \
 	lldpd net-tools curl || true
 
+# FRR is not available in Debian jessie repos (too new); install separately so failure
+# doesn't block other packages. Cross-compile or use a third-party .deb if needed.
+DEBIAN_FRONTEND=noninteractive chroot "$STAGING" apt-get install -y -q \
+	--no-install-recommends \
+	--allow-unauthenticated \
+	frr 2>/dev/null || log "WARN: frr not available in jessie repos (expected)"
+
 # Install systemd explicitly (default on jessie but ensure it's present)
 DEBIAN_FRONTEND=noninteractive chroot "$STAGING" apt-get install -y -q \
 	--no-install-recommends \
@@ -256,5 +263,5 @@ trap - EXIT
 
 log "Packing squashfs to $OUT_FILE..."
 mkdir -p "$(dirname "$OUT_FILE")"
-mksquashfs "$STAGING" "$OUT_FILE" -comp xz -noappend -no-duplicates
+mksquashfs "$STAGING" "$OUT_FILE" -comp xz -noappend -no-duplicates -no-xattrs
 log "Done: $OUT_FILE"

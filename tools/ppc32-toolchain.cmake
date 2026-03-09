@@ -6,9 +6,10 @@
 # Prereq: apt-get install gcc-powerpc-linux-gnu
 #
 # COMPATIBILITY: This toolchain uses powerpc-linux-gnu-gcc which is a GLIBC
-# toolchain. The rootfs MUST use glibc (Void Linux powerpc, not powerpc-musl).
-# If you switch the rootfs to musl, you must also switch the compiler to a
-# musl cross-toolchain (e.g. built via musl-cross-make with TARGET=powerpc-linux-musl).
+# toolchain. The rootfs uses Debian 8 (Jessie) powerpc which ships glibc.
+# If you switch the rootfs to a musl-based distro, you must also switch the
+# compiler to a musl cross-toolchain (e.g. built via musl-cross-make with
+# TARGET=powerpc-linux-musl).
 #
 # SYSROOT (recommended):
 #   Set PPC32_SYSROOT env var to the rootfs staging directory so the linker
@@ -41,7 +42,7 @@ set(CMAKE_STRIP        powerpc-linux-gnu-strip  CACHE FILEPATH "strip")
 set(CMAKE_C_FLAGS_INIT   "-mcpu=8548")
 set(CMAKE_CXX_FLAGS_INIT "-mcpu=8548")
 
-# Sysroot: point at the Void Linux rootfs staging dir so we link against the
+# Sysroot: point at the Debian Jessie rootfs staging dir so we link against the
 # exact libc that will be on the target (not the build host's cross headers).
 # Set via env: PPC32_SYSROOT=/path/to/staging  OR  cmake -DPPC32_SYSROOT=...
 if(DEFINED ENV{PPC32_SYSROOT} AND NOT DEFINED PPC32_SYSROOT)

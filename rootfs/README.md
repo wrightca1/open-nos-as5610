@@ -1,15 +1,17 @@
-# Root Filesystem — Debian 12 (Bookworm) PPC32
+# Root Filesystem — Debian 8 (Jessie) PPC32
 
-The rootfs is **Debian 12 (Bookworm)** bootstrapped for `powerpc` (PPC32 big-endian).
-This matches the approach used by Cumulus (Debian 7) and ONL (Debian 8), but on a
-current, supported Debian release.
+The rootfs is **Debian 8 (Jessie)** bootstrapped for `powerpc` (PPC32 big-endian).
+Debian 8 is the last Debian release with an official PowerPC (PPC32 big-endian) port.
+This matches the approach used by Cumulus (Debian 7) and ONL (Debian 8). The archive
+is EOL but available at `archive.debian.org`.
 
-## Why Debian
+## Why Debian 8 (Jessie)
 
-- Full PPC32 package archive — FRR, iproute2, lldpd, openssh, ethtool all install with `apt`
-- Our components (SDK, switchd, platform-mgrd) ship as versioned `.deb` packages via `dpkg`
-- Security patches via `apt upgrade` — no full rebuild required for CVE fixes
+- Last Debian release with official PPC32 big-endian port
+- Full PPC32 package archive — iproute2, lldpd, openssh, ethtool all install with `apt`
+- Our components (SDK, switchd, platform-mgrd) are installed directly into the rootfs
 - Standard `debootstrap` + QEMU user-mode bootstrap is well-tested for PPC32
+- Note: FRR is not available in jessie repos and must be cross-compiled separately
 
 ## Bootstrap Process (runs on x86 build host)
 
@@ -19,41 +21,42 @@ apt-get install gcc-powerpc-linux-gnu debootstrap qemu-user-static \
                 squashfs-tools dpkg-dev
 
 # 2. Stage 1: debootstrap (foreign, runs on x86)
-debootstrap --arch=powerpc --foreign bookworm /mnt/rootfs \
-    http://deb.debian.org/debian
+debootstrap --arch=powerpc --foreign --no-check-gpg jessie /mnt/rootfs \
+    http://archive.debian.org/debian
 
 # 3. Stage 2: complete inside QEMU PPC32 chroot
 cp /usr/bin/qemu-ppc-static /mnt/rootfs/usr/bin/
 chroot /mnt/rootfs /debootstrap/debootstrap --second-stage
 
-# 4. Configure APT sources
+# 4. Configure APT sources (jessie is EOL; use archive.debian.org)
 cat > /mnt/rootfs/etc/apt/sources.list <<EOF
-deb http://deb.debian.org/debian bookworm main
-deb http://deb.debian.org/debian-security bookworm-security main
-deb http://deb.debian.org/debian bookworm-updates main
+deb http://archive.debian.org/debian jessie main
 EOF
+# Disable release date validation (jessie is EOL)
+echo 'Acquire::Check-Valid-Until "false";' > \
+    /mnt/rootfs/etc/apt/apt.conf.d/99ignore-release-date
 
 # 5. Install NOS packages from Debian archive
 chroot /mnt/rootfs apt-get update
 chroot /mnt/rootfs apt-get install -y \
-    frr \
     iproute2 \
-    ifupdown2 \
+    isc-dhcp-client \
     lldpd \
     openssh-server \
-    python3 \
+    python3-minimal \
     ethtool \
     tcpdump \
     i2c-tools \
     pciutils \
-    libpci3
+    u-boot-tools \
+    net-tools \
+    curl
+# Note: frr is NOT available in jessie repos (must be cross-compiled separately)
 
-# 6. Install our own cross-compiled .deb packages
-dpkg --root=/mnt/rootfs -i \
-    ../sdk/libbcm56846_*.deb \
-    ../switchd/nos-switchd_*.deb \
-    ../bde/nos-bde-modules_*.deb \
-    ../platform/platform-mgrd_*.deb
+# 6. Install our cross-compiled artifacts directly
+cp build/sdk/libbcm56846.so /mnt/rootfs/usr/lib/
+cp build/switchd/nos-switchd /mnt/rootfs/usr/sbin/
+cp bde/*.ko /mnt/rootfs/lib/modules/5.10.0-nos/
 
 # 7. Configure systemd services, hostname, fstab, etc.
 # (see rootfs/overlay/ for files copied in)
@@ -91,19 +94,21 @@ persist (/dev/sda1, ext2, mounted at /mnt/persist):
 
 | Package | Source | How |
 |---------|--------|-----|
-| `frr` | Debian archive | `apt install frr` |
-| `iproute2` | Debian archive | `apt install iproute2` |
-| `ifupdown2` | Debian archive | `apt install ifupdown2` |
-| `lldpd` | Debian archive | `apt install lldpd` |
-| `openssh-server` | Debian archive | `apt install openssh-server` |
-| `python3` | Debian archive | `apt install python3` |
-| `ethtool` | Debian archive | `apt install ethtool` |
-| `tcpdump` | Debian archive | `apt install tcpdump` |
-| `i2c-tools` | Debian archive | `apt install i2c-tools` |
-| `libbcm56846` | **our code** | cross-compiled .deb |
-| `nos-switchd` | **our code** | cross-compiled .deb |
-| `nos-bde-modules` | **our code** | cross-compiled .deb |
-| `platform-mgrd` | **our code** | cross-compiled .deb |
+| `iproute2` | Debian jessie archive | `apt install iproute2` |
+| `isc-dhcp-client` | Debian jessie archive | `apt install isc-dhcp-client` |
+| `lldpd` | Debian jessie archive | `apt install lldpd` |
+| `openssh-server` | Debian jessie archive | `apt install openssh-server` |
+| `python3-minimal` | Debian jessie archive | `apt install python3-minimal` |
+| `ethtool` | Debian jessie archive | `apt install ethtool` |
+| `tcpdump` | Debian jessie archive | `apt install tcpdump` |
+| `i2c-tools` | Debian jessie archive | `apt install i2c-tools` |
+| `u-boot-tools` | Debian jessie archive | `apt install u-boot-tools` |
+| `frr` | **not available** | Must be cross-compiled separately |
+| `libbcm56846.so` | **our code** | cross-compiled, installed directly |
+| `nos-switchd` | **our code** | cross-compiled, installed directly |
+| `nos_kernel_bde.ko` | **our code** | cross-compiled, installed directly |
+| `nos_user_bde.ko` | **our code** | cross-compiled, installed directly |
+| `platform-mgrd` | **our code** | cross-compiled, installed directly |
 
 ## Init System
 

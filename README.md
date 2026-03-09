@@ -29,7 +29,7 @@ A complete, from-scratch NOS stack that gives the AS5610-52X:
 - **Routing protocols** — BGP, OSPF, ISIS, BFD via FRRouting (FRR)
 - **Platform management** — thermal, fans, PSU, SFP/QSFP via CPLD
 - **ONIE installer** — installs from a factory-fresh switch; A/B upgrade support
-- **Debian 12 userspace** — apt, openssh, standard Linux tools
+- **Debian 8 (Jessie) userspace** — apt, openssh, standard Linux tools
 
 The switch forwards packets in hardware (BCM56846 ASIC) with FRR handling routing protocols in software. The CPU only handles control traffic (ARP, BGP, OSPF, SSH).
 
@@ -163,7 +163,7 @@ onie-nos-install http://your-server/open-nos-as5610.bin
 - [sdk/README.md](sdk/README.md) — SDK API, table layouts, S-Channel format
 - [switchd/README.md](switchd/README.md) — nos-switchd design, netlink handlers, thread architecture
 - [platform/README.md](platform/README.md) — CPLD, thermal, SFP interface
-- [rootfs/README.md](rootfs/README.md) — Debian 12 bootstrap procedure, package list, filesystem layout
+- [rootfs/README.md](rootfs/README.md) — Debian 8 (Jessie) bootstrap procedure, package list, filesystem layout
 - [onie-installer/README.md](onie-installer/README.md) — installer format, partition layout, A/B upgrade
 
 ---

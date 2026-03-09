@@ -1,10 +1,8 @@
 /* Port enable/speed/link — XLPORT/MAC regs via S-Channel (RE: PORT_BRINGUP_REGISTER_MAP.md) */
 #include "bcm56846.h"
+#include "sbus.h"
 #include <errno.h>
 #include <string.h>
-
-extern int schan_write_memory(int unit, uint32_t addr, const uint32_t *data, int num_words);
-extern int schan_read_memory(int unit, uint32_t addr, uint32_t *data, int num_words);
 
 #define XLPORT_PORT_ENABLE_OFF   (0x80000u + 0x22au)
 #define MAC_MODE_OFF             0x511u
@@ -134,7 +132,7 @@ int bcm56846_port_enable_set(int unit, int port, int enable)
 
 	val = xlport_enable_shadow[block_idx];
 	addr = base + XLPORT_PORT_ENABLE_OFF;
-	if (schan_write_memory(unit, addr, &val, 1) != 0)
+	if (sbus_reg_write(addr, val) != 0)
 		return -EIO;
 	if (enable)
 		bcm56846_serdes_init_10g(unit, port);
@@ -177,7 +175,7 @@ int bcm56846_port_link_status_get(int unit, int port, int *link_up)
 		return -EINVAL;
 
 	addr = base + (uint32_t)lane * 0x1000u + MAC_MODE_OFF;
-	if (schan_read_memory(unit, addr, &val, 1) != 0) {
+	if (sbus_reg_read(addr, &val) != 0) {
 		/* If read isn't supported yet, fall back to admin enable state. */
 		*link_up = (xlport_enable_shadow[block_idx] & (1u << lane)) ? 1 : 0;
 		return 0;

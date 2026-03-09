@@ -1,17 +1,14 @@
 /* VLAN — S-Channel table programming (RE: VLAN_TABLE_FORMAT.md) */
 #include "bcm56846.h"
+#include "sbus.h"
 #include <errno.h>
 #include <string.h>
 
-extern int schan_write_memory(int unit, uint32_t addr, const uint32_t *data, int num_words);
-
 #define VLAN_BASE        0x12168000u
 #define VLAN_WORDS       10
-#define VLAN_STRIDE      40u
 
 #define EGR_VLAN_BASE    0x0d260000u
 #define EGR_VLAN_WORDS   8
-#define EGR_VLAN_STRIDE  32u
 
 static uint32_t vlan_ing[4096][VLAN_WORDS];
 static uint32_t vlan_egr[4096][EGR_VLAN_WORDS];
@@ -83,14 +80,14 @@ static void egr_vlan_set_valid_stg(uint32_t words[EGR_VLAN_WORDS], int stg, int 
 
 static int vlan_write_ing(int unit, uint16_t vid)
 {
-	uint32_t addr = VLAN_BASE + (uint32_t)vid * VLAN_STRIDE;
-	return schan_write_memory(unit, addr, vlan_ing[vid], VLAN_WORDS);
+	(void)unit;
+	return sbus_mem_write(VLAN_BASE, (int)vid, vlan_ing[vid], VLAN_WORDS);
 }
 
 static int vlan_write_egr(int unit, uint16_t vid)
 {
-	uint32_t addr = EGR_VLAN_BASE + (uint32_t)vid * EGR_VLAN_STRIDE;
-	return schan_write_memory(unit, addr, vlan_egr[vid], EGR_VLAN_WORDS);
+	(void)unit;
+	return sbus_mem_write(EGR_VLAN_BASE, (int)vid, vlan_egr[vid], EGR_VLAN_WORDS);
 }
 
 int bcm56846_vlan_create(int unit, uint16_t vid)

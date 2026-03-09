@@ -208,16 +208,23 @@ config ACCTON_AS5610_52X\
         warn "Without this patch the kernel will panic: 'No suitable machine description found'"
     fi
 
-    # Clean version string: "5.10.0-nos" instead of "5.10.0-dirty"
+    # Clean version string: "5.10.0-nos" instead of "5.10.0-nos+" or "5.10.0-dirty"
     # CONFIG_LOCALVERSION_AUTO appends +git-hash-dirty when tree has uncommitted changes
     # (our AS5610 machine patch is uncommitted). Disable it and set a fixed suffix.
+    # .scmversion suppresses the "+" dirty suffix from scripts/setlocalversion.
     ./scripts/config --set-str CONFIG_LOCALVERSION "-nos"
     ./scripts/config -d CONFIG_LOCALVERSION_AUTO
+    touch "$KERNEL_DIR/.scmversion"
     2>/dev/null || true
 
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- olddefconfig
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- uImage modules -j$(nproc)
     make ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- modules_prepare
+    # Copy kernel to boot/ so FIT builder (boot/build-fit.sh) uses the freshly built kernel
+    if [ -f "$KERNEL_DIR/arch/powerpc/boot/uImage" ]; then
+        cp -f "$KERNEL_DIR/arch/powerpc/boot/uImage" "$REPO_ROOT/boot/uImage"
+        log "Copied uImage to boot/ for FIT builder."
+    fi
     KERNEL_SRC="$KERNEL_DIR"
     cd "$REPO_ROOT"
 else

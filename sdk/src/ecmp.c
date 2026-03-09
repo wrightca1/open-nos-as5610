@@ -1,18 +1,15 @@
 /* ECMP — S-Channel table programming (RE: L3_NEXTHOP_FORMAT.md) */
 #include "bcm56846.h"
+#include "sbus.h"
 #include <errno.h>
 #include <string.h>
 
-extern int schan_write_memory(int unit, uint32_t addr, const uint32_t *data, int num_words);
-
 #define L3_ECMP_BASE         0x0e176000u
 #define L3_ECMP_WORDS        1
-#define L3_ECMP_STRIDE       4u
 #define L3_ECMP_ENTRIES      4096
 
 #define L3_ECMP_GROUP_BASE   0x0e174000u
 #define L3_ECMP_GROUP_WORDS  7
-#define L3_ECMP_GROUP_STRIDE 32u
 #define L3_ECMP_GROUP_ENTRIES 1024
 
 static int ecmp_used[L3_ECMP_ENTRIES];
@@ -41,14 +38,14 @@ static void set_bits_u64(uint32_t *words, int num_words, int start_bit, int widt
 
 static int l3_ecmp_write(int unit, int index, uint32_t word)
 {
-	uint32_t addr = L3_ECMP_BASE + (uint32_t)index * L3_ECMP_STRIDE;
-	return schan_write_memory(unit, addr, &word, L3_ECMP_WORDS);
+	(void)unit;
+	return sbus_mem_write(L3_ECMP_BASE, index, &word, L3_ECMP_WORDS);
 }
 
 static int l3_ecmp_group_write(int unit, int group_id, const uint32_t *words)
 {
-	uint32_t addr = L3_ECMP_GROUP_BASE + (uint32_t)group_id * L3_ECMP_GROUP_STRIDE;
-	return schan_write_memory(unit, addr, words, L3_ECMP_GROUP_WORDS);
+	(void)unit;
+	return sbus_mem_write(L3_ECMP_GROUP_BASE, group_id, words, L3_ECMP_GROUP_WORDS);
 }
 
 static int alloc_group_id(void)

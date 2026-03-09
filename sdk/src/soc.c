@@ -19,6 +19,7 @@
  * Unknown named registers produce a warning but do not abort the script.
  */
 #include "bde_ioctl.h"
+#include "sbus.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +29,27 @@
 extern int bde_write_reg(uint32_t offset, uint32_t value);
 extern int bde_read_reg(uint32_t offset, uint32_t *value);
 extern int bcm56846_chip_init(int unit);
+
+/*
+ * CMIC BAR0 region is 256KB (0x00000 - 0x3FFFF).
+ * Addresses within this range use direct BAR0 read/write.
+ * Addresses >= 0x40000 are SBUS addresses requiring SCHAN.
+ */
+#define CMIC_BAR0_SIZE  0x40000u
+
+static inline int soc_write_reg(uint32_t addr, uint32_t value)
+{
+	if (addr < CMIC_BAR0_SIZE)
+		return bde_write_reg(addr, value);
+	return sbus_reg_write(addr, value);
+}
+
+static inline int soc_read_reg(uint32_t addr, uint32_t *value)
+{
+	if (addr < CMIC_BAR0_SIZE)
+		return bde_read_reg(addr, value);
+	return sbus_reg_read(addr, value);
+}
 
 /* Named register lookup table for BCM56846 (Trident+).
  * Addresses from BCM SDK RE and Broadcom documentation.
@@ -167,14 +189,14 @@ static int soc_run_internal(const char *script_path)
 			if (sscanf(arg1, "0x%x", &addr) == 1 || sscanf(arg1, "%u", &addr) == 1) {
 				if (sscanf(arg2, "0x%lx", &val) != 1)
 					sscanf(arg2, "%lu", &val);
-				bde_write_reg((uint32_t)addr, (uint32_t)val);
+				soc_write_reg((uint32_t)addr, (uint32_t)val);
 			} else {
 				/* Named register */
 				uint32_t reg = reg_lookup(arg1);
 				if (sscanf(arg2, "0x%lx", &val) != 1)
 					sscanf(arg2, "%lu", &val);
 				if (reg) {
-					bde_write_reg(reg, (uint32_t)val);
+					soc_write_reg(reg, (uint32_t)val);
 				} else {
 					fprintf(stderr, "[soc] setreg: unknown register '%s' (skipping)\n", arg1);
 				}
@@ -185,7 +207,7 @@ static int soc_run_internal(const char *script_path)
 		if (strcmp(cmd, "getreg") == 0 && nargs >= 2) {
 			addr = 0;
 			if (sscanf(arg1, "0x%x", &addr) == 1 || sscanf(arg1, "%u", &addr) == 1) {
-				bde_read_reg((uint32_t)addr, &read_val);
+				soc_read_reg((uint32_t)addr, &read_val);
 			}
 			continue;
 		}
@@ -238,10 +260,10 @@ static int soc_run_internal(const char *script_path)
 			/* Read-modify-write */
 			{
 				uint32_t cur = 0u;
-				bde_read_reg(reg_addr, &cur);
+				soc_read_reg(reg_addr, &cur);
 				cur = (cur & ~(fe->mask << fe->shift)) |
 				      ((uint32_t)(field_val & fe->mask) << fe->shift);
-				bde_write_reg(reg_addr, cur);
+				soc_write_reg(reg_addr, cur);
 				fprintf(stderr,
 					"[soc] m %s.%s=%lu -> 0x%08x\n",
 					arg1, field_name, field_val, cur);

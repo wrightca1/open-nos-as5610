@@ -24,7 +24,7 @@ struct nos_bde_dma_info {
 };
 
 struct nos_bde_schan {
-	uint32_t cmd[8];
+	uint32_t cmd[16];
 	uint32_t data[16];
 	int32_t  len;
 	int32_t  status;

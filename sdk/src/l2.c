@@ -5,17 +5,14 @@
  */
 #include "bcm56846.h"
 #include "bcm56846_regs.h"
+#include "sbus.h"
 #include <errno.h>
 #include <string.h>
 
-#define L2_ENTRY_BASE     0x07120000
+#define L2_ENTRY_BASE     0x07120000u
 #define L2_ENTRY_ENTRIES  131072
 #define L2_ENTRY_WORDS    4
-#define L2_ENTRY_STRIDE   16   /* 13-byte entry, 16-byte aligned */
 #define KEY_TYPE_L2       0
-
-extern int schan_write_memory(int unit, uint32_t addr, const uint32_t *data, int num_words);
-extern int schan_read_memory(int unit, uint32_t addr, uint32_t *data, int num_words);
 
 /* Hash key: (MAC<<16)|(VLAN<<4)|(KEY_TYPE<<1)|0. VALID=0 in key. */
 static uint64_t l2_hash_key(const uint8_t mac[6], uint16_t vid)
@@ -50,18 +47,18 @@ static void l2_pack_entry(const bcm56846_l2_addr_t *addr, uint32_t *words)
 	words[3] = 0;
 }
 
-/* Write L2_ENTRY at index via S-Channel WRITE_MEMORY (opcode 0x28, addr = base + index*stride). */
+/* Write L2_ENTRY at index via SCHAN WRITE_MEMORY. */
 static int l2_table_write(int unit, int index, const uint32_t *words)
 {
-	uint32_t addr = L2_ENTRY_BASE + (uint32_t)index * L2_ENTRY_STRIDE;
-	return schan_write_memory(unit, addr, words, L2_ENTRY_WORDS);
+	(void)unit;
+	return sbus_mem_write(L2_ENTRY_BASE, index, words, L2_ENTRY_WORDS);
 }
 
-/* Read L2_ENTRY at index via S-Channel READ_MEMORY. */
+/* Read L2_ENTRY at index via SCHAN READ_MEMORY. */
 static int l2_table_read(int unit, int index, uint32_t *words)
 {
-	uint32_t addr = L2_ENTRY_BASE + (uint32_t)index * L2_ENTRY_STRIDE;
-	return schan_read_memory(unit, addr, words, L2_ENTRY_WORDS);
+	(void)unit;
+	return sbus_mem_read(L2_ENTRY_BASE, index, words, L2_ENTRY_WORDS);
 }
 
 /* Delete: write all-zero (VALID=0) at index. */
@@ -168,14 +165,14 @@ int bcm56846_l2_addr_get(int unit, const uint8_t mac[6], uint16_t vid, bcm56846_
 
 static int l2_user_table_write(int unit, int index, const uint32_t *words)
 {
-	uint32_t addr = L2_USER_ENTRY_BASE + (uint32_t)index * (L2_USER_ENTRY_WORDS * 4);
-	return schan_write_memory(unit, addr, words, L2_USER_ENTRY_WORDS);
+	(void)unit;
+	return sbus_mem_write(L2_USER_ENTRY_BASE, index, words, L2_USER_ENTRY_WORDS);
 }
 
 static int l2_user_table_read(int unit, int index, uint32_t *words)
 {
-	uint32_t addr = L2_USER_ENTRY_BASE + (uint32_t)index * (L2_USER_ENTRY_WORDS * 4);
-	return schan_read_memory(unit, addr, words, L2_USER_ENTRY_WORDS);
+	(void)unit;
+	return sbus_mem_read(L2_USER_ENTRY_BASE, index, words, L2_USER_ENTRY_WORDS);
 }
 
 /* Pack 5 words: KEY (VALID, MAC, VLAN, KEY_TYPE), MASK (61 bits), DATA (PRI, CPU, PORT_NUM, BPDU). */

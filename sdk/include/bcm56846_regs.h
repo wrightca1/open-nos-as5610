@@ -23,12 +23,25 @@
 #define CMIC_CMC0_SCHAN_CTRL      0x33000u   /* CMC2 SCHAN_CTRL (= CMC2_BASE + 0x0) */
 #define CMIC_CMC0_SCHAN_MSG(n)    (0x3300cu + (n) * 4u)  /* CMC2 MSG0..MSG20 */
 
-/* CMICm packet DMA channels */
-#define CMICM_CMC_BASE            0x31000u
-#define CMICM_DMA_CTRL(ch)        (0x31140u + 4u * (ch))
-#define CMICM_DMA_DESC0(ch)       (0x31158u + 4u * (ch))
-#define CMICM_DMA_HALT_ADDR(ch)   (0x31120u + 4u * (ch))
-#define CMICM_DMA_STAT            0x31150u
+/*
+ * CMIC packet DMA — old-style CMIC (BCM56840/56846 Trident+).
+ * BCM56840 uses CMIC_DMA_* at 0x100-0x11C, NOT CMICm at 0x31xxx.
+ * Source: OpenMDK/cdk/PKG/chip/bcm56840/bcm56840_a0_defs.h
+ *
+ * 4 DMA channels: CH0=TX, CH1=RX typically.
+ * CMIC_DMA_CTRL fields per channel (8 bits apart):
+ *   CHx_DIRECTION, CHx_ABORT_DMA, CHx_SEL_INTR_ON_DESC_OR_PKT
+ * CMIC_DMA_STAT fields:
+ *   DMA_EN bits[3:0], CHAIN_DONE bits[7:4], DESC_DONE bits[11:8]
+ */
+#define CMIC_DMA_CTRL             0x00000100u
+#define CMIC_DMA_STAT             0x00000104u
+#define CMIC_DMA_DESC(ch)         (0x00000110u + 4u * (ch))  /* CH0=0x110, CH1=0x114 */
+
+/* Legacy aliases for compatibility */
+#define CMICM_DMA_CTRL(ch)        CMIC_DMA_CTRL
+#define CMICM_DMA_DESC0(ch)       CMIC_DMA_DESC(ch)
+#define CMICM_DMA_STAT            CMIC_DMA_STAT
 
 /*
  * CMIC diagnostic and boot-detection registers.
@@ -140,57 +153,52 @@
 #define BCM56846_RING_MAP_7       0x00000000u
 
 /*
- * TOP block SBUS addresses for BCM56846 (Trident+).
+ * CMIC_SOFT_RESET_REG (BAR0+0x580) — direct PCI BAR0 register.
  *
- * The TOP block (SBUS agent 3 on ring 2) contains chip-level registers
- * including TOP_SOFT_RESET_REG which controls XLPORT soft-reset state.
- * After a cold power cycle, all XLP_RESET bits are SET (XLPORT in reset).
- * They must be cleared before any SCHAN access to XLPORT/XLMAC registers.
+ * BCM56840/56846 (Trident+) uses CMIC_SOFT_RESET_REGr for all block resets.
+ * This is NOT accessed via SCHAN — it's a direct BAR0 read/write.
  *
- * SBUS address RE analysis (Cumulus switchd, BCM SDK 6.3.8, BCM56846_A1):
+ * BCM56850 (Trident2) and later use TOP_SOFT_RESET_REGr via SCHAN instead.
+ * BCM56840/56846 does NOT have TOP_SOFT_RESET_REGr at all — confirmed by
+ * grep of OpenMDK/cdk/PKG/chip/bcm56840/ (no TOP_SOFT_RESET_REG definition).
  *
- * FUN_10325fa0 and FUN_103260d4 in the switchd binary are SDK register-cache
- * hash table insert/lookup functions.  Their hash keys ARE the SCHAN command
- * words (opcode + SBUS routing + register offset in one 32-bit value).
- * The assembly constructs the key as:
- *   key = (block_sel & 0x7FFF) << 11 | (reg_off & 0x7FF) | 0x28000000
- * where 0x28000000 encodes SCHAN opcode 0x0A (READ_REGISTER) in bits[31:26].
+ * Source: OpenMDK/cdk/PKG/chip/bcm56840/bcm56840_a0_defs.h:
+ *   #define BCM56840_A0_CMIC_SOFT_RESET_REGr 0x00000580
  *
- * For TOP_SOFT_RESET_REG:
- *   block_sel = data constant at 0x11436428 → lower 15 bits = 0x0066
- *   reg_off   = 0x200 (known BCM56840 TOP_SOFT_RESET_REG offset)
- *   SCHAN key = (0x0066 << 11) | 0x200 | 0x28000000 = 0x28033200
- *
- * In this SCHAN word format (CMICm BCM56840/56846):
- *   bits[31:26] = 0x0A = READ_REGISTER opcode
- *   bits[25:16] = 0x003 = SBUS destination 3 = TOP block (confirmed: RING_MAP_0
- *                 nibble 3 = ring 2 = TOP block ring for BCM56846)
- *   bits[15:0]  = 0x3200 = (block subaddr 0x32 from high bits of block_sel << 11)
- *                          | reg offset 0x200 in bits[10:8]
- *
- * This SCHAN word (0x28033200) goes in the BDE schan_op addr argument (cmd[1]).
- * If the BDE strips the opcode, the addr-only variant 0x00033200 may be needed.
- *
- * BCM56846 has 13 XLPORT blocks (XLP0–XLP12) for 52 front-panel ports.
- * TOP_SOFT_RESET_REG bits [12:0] = XLP0_RESET..XLP12_RESET.
- * Write 0x00000000 to de-assert all XLPORT resets.
+ * All fields are active-LOW (_RST_L): bit=1 = OUT of reset, bit=0 = IN reset.
+ * After full reset sequence, the kernel BDE writes 0x0000FFFF (all out of reset).
  */
-#define BCM56846_TOP_SBUS_AGENT          3u      /* TOP block SBUS agent from ring map */
-#define BCM56846_TOP_REG_SOFT_RESET      0x200u  /* TOP_SOFT_RESET_REG offset */
-#define BCM56846_TOP_REG_SOFT_RESET_2    0x204u  /* TOP_SOFT_RESET_REG_2 offset */
-#define BCM56846_XLPORT_COUNT            13u     /* 13 XLP blocks = 52 ports */
-#define BCM56846_XLPORT_RESET_MASK       0x1FFFu /* bits [12:0] = XLP0-12 reset */
+#define CMIC_SOFT_RESET               0x0580u
+#define CMIC_SOFT_RESET_2             0x0584u
 
-/*
- * Candidate SBUS addresses (probed in priority order).
- * CAND_0 and CAND_1 are highest-confidence based on RE analysis.
+/* CMIC_SOFT_RESET bit fields */
+#define CMIC_PG0_RST_L                (1u << 0)   /* Port group 0: xlport0-4  (blocks 10-14) */
+#define CMIC_PG1_RST_L                (1u << 1)   /* Port group 1: xlport5-8  (blocks 15-18) */
+#define CMIC_PG2_RST_L                (1u << 2)   /* Port group 2: xlport9-13 (blocks 19-23) */
+#define CMIC_PG3_RST_L                (1u << 3)   /* Port group 3: xlport14-17 (blocks 24-27) */
+#define CMIC_MMU_RST_L                (1u << 4)   /* MMU block */
+#define CMIC_IP_RST_L                 (1u << 5)   /* Ingress Pipeline */
+#define CMIC_EP_RST_L                 (1u << 6)   /* Egress Pipeline */
+#define CMIC_XG_PLL0_RST_L            (1u << 7)   /* LCPLL 0 */
+#define CMIC_XG_PLL1_RST_L            (1u << 8)   /* LCPLL 1 */
+#define CMIC_XG_PLL2_RST_L            (1u << 9)   /* LCPLL 2 */
+#define CMIC_XG_PLL3_RST_L            (1u << 10)  /* LCPLL 3 */
+#define CMIC_XG_PLL0_POST_RST_L       (1u << 11)  /* PLL0 post-divider */
+#define CMIC_XG_PLL1_POST_RST_L       (1u << 12)  /* PLL1 post-divider */
+#define CMIC_XG_PLL2_POST_RST_L       (1u << 13)  /* PLL2 post-divider */
+#define CMIC_XG_PLL3_POST_RST_L       (1u << 14)  /* PLL3 post-divider */
+#define CMIC_TEMP_MON_RST_L           (1u << 15)  /* Temperature monitor */
+#define CMIC_SOFT_RESET_ALL_OUT       0x0000FFFFu  /* All blocks out of reset */
+
+/* BCM56846 port group assignments (from OpenMDK bcm56840_a0_chip.c):
+ *   PG0 = XLPORT blocks 10-14  (ring 3)
+ *   PG1 = XLPORT blocks 15-18  (ring 3)
+ *   PG2 = XLPORT blocks 19-23  (ring 4)
+ *   PG3 = XLPORT blocks 24-27  (ring 4)
  */
-#define BCM56846_TOP_SOFT_RESET_CAND_0   0x28033200u  /* RE-confirmed SCHAN word */
-#define BCM56846_TOP_SOFT_RESET_CAND_1   0x00033200u  /* SCHAN addr without opcode */
-#define BCM56846_TOP_SOFT_RESET_CAND_2   0x00030200u  /* agent<<16 | 0x200 */
-#define BCM56846_TOP_SOFT_RESET_CAND_3   0x00300200u  /* agent<<20 | 0x200 */
-#define BCM56846_TOP_SOFT_RESET_CAND_4   0x02030200u  /* ring2<<24|agent<<16|0x200 */
-#define BCM56846_TOP_SOFT_RESET_CAND_5   0x40030200u  /* 0x40 prefix variant */
-#define BCM56846_TOP_SOFT_RESET_CAND_6   0x00000200u  /* bare offset */
+
+/* XLPORT_MODE_REGr — CDK offset 0x80229 within an XLPORT block.
+ * Used for SCHAN probe/diagnostic to verify block accessibility. */
+#define XLPORT_MODE_REG_OFF           0x80229u
 
 #endif

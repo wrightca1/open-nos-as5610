@@ -11,6 +11,8 @@ set(SDK_SOURCES
   src/config.c
   src/soc.c
   src/init.c
+  src/sbus.c
+  src/init_datapath.c
   src/schan.c
   src/reg.c
   src/port.c

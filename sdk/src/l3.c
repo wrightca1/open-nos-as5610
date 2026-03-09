@@ -1,27 +1,22 @@
 /* L3 intf + egress + route + host — S-Channel table programming (RE: L3_NEXTHOP_FORMAT, SWITCHD_L3_ROUTE_PROGRAMMING_ANALYSIS) */
 #include "bcm56846.h"
+#include "sbus.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <string.h>
 
-extern int schan_write_memory(int unit, uint32_t addr, const uint32_t *data, int num_words);
-
 #define EGR_L3_INTF_BASE        0x01264000u
 #define EGR_L3_INTF_WORDS       4
-#define EGR_L3_INTF_STRIDE      16u
 
 #define ING_L3_NEXT_HOP_BASE    0x0e17c000u
 #define ING_L3_NEXT_HOP_WORDS   2
-#define ING_L3_NEXT_HOP_STRIDE  8u
 
 #define EGR_L3_NEXT_HOP_BASE    0x0c260000u
 #define EGR_L3_NEXT_HOP_WORDS   4
-#define EGR_L3_NEXT_HOP_STRIDE  16u
 
 /* L3_DEFIP is TCAM-backed; we do a best-effort WRITE_MEMORY per RE. */
 #define L3_DEFIP_BASE           0x0a170000u
 #define L3_DEFIP_WORDS          8
-#define L3_DEFIP_STRIDE         32u
 
 #define MAX_L3_INTF             4096
 #define MAX_L3_NHOP             16384
@@ -79,26 +74,26 @@ static uint64_t mac48_to_u64(const uint8_t mac[6])
 
 static int egr_l3_intf_write(int unit, int intf_id, const uint32_t *words)
 {
-	uint32_t addr = EGR_L3_INTF_BASE + (uint32_t)intf_id * EGR_L3_INTF_STRIDE;
-	return schan_write_memory(unit, addr, words, EGR_L3_INTF_WORDS);
+	(void)unit;
+	return sbus_mem_write(EGR_L3_INTF_BASE, intf_id, words, EGR_L3_INTF_WORDS);
 }
 
 static int ing_l3_nhop_write(int unit, int nhop_id, const uint32_t *words)
 {
-	uint32_t addr = ING_L3_NEXT_HOP_BASE + (uint32_t)nhop_id * ING_L3_NEXT_HOP_STRIDE;
-	return schan_write_memory(unit, addr, words, ING_L3_NEXT_HOP_WORDS);
+	(void)unit;
+	return sbus_mem_write(ING_L3_NEXT_HOP_BASE, nhop_id, words, ING_L3_NEXT_HOP_WORDS);
 }
 
 static int egr_l3_nhop_write(int unit, int nhop_id, const uint32_t *words)
 {
-	uint32_t addr = EGR_L3_NEXT_HOP_BASE + (uint32_t)nhop_id * EGR_L3_NEXT_HOP_STRIDE;
-	return schan_write_memory(unit, addr, words, EGR_L3_NEXT_HOP_WORDS);
+	(void)unit;
+	return sbus_mem_write(EGR_L3_NEXT_HOP_BASE, nhop_id, words, EGR_L3_NEXT_HOP_WORDS);
 }
 
 static int l3_defip_write(int unit, int index, const uint32_t *words)
 {
-	uint32_t addr = L3_DEFIP_BASE + (uint32_t)index * L3_DEFIP_STRIDE;
-	return schan_write_memory(unit, addr, words, L3_DEFIP_WORDS);
+	(void)unit;
+	return sbus_mem_write(L3_DEFIP_BASE, index, words, L3_DEFIP_WORDS);
 }
 
 int bcm56846_l3_intf_create(int unit, const uint8_t mac[6], uint16_t vid, int *intf_id)

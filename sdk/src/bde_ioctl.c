@@ -75,7 +75,7 @@ void *bde_mmap_dma(void)
 int bde_schan_op(const uint32_t *cmd, int cmd_words, uint32_t *data, int data_len, int *status)
 {
 	struct nos_bde_schan s = { .len = cmd_words, .status = -1 };
-	memcpy(s.cmd, cmd, sizeof(uint32_t) * (cmd_words <= 8 ? cmd_words : 8));
+	memcpy(s.cmd, cmd, sizeof(uint32_t) * (cmd_words <= 16 ? cmd_words : 16));
 	if (data && data_len > 0)
 		memcpy(s.data, data, sizeof(uint32_t) * (data_len <= 16 ? data_len : 16));
 	if (bde_fd < 0 || ioctl(bde_fd, NOS_BDE_SCHAN_OP, &s) < 0)

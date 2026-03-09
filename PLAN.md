@@ -94,7 +94,7 @@
 | Component | Source | License | Notes |
 |-----------|--------|---------|-------|
 | **Linux kernel** | upstream kernel.org | GPL-2.0 | PPC32 big-endian, cross-compiled; must support tun.ko, i2c, PCI |
-| **Void Linux (powerpc, musl)** | voidlinux.org | Various (all OSS) | Base rootfs — actively maintained, xbps package manager, powerpc big-endian 32-bit port, musl libc; replaces EOL Debian 8 (jessie) |
+| **Debian 8 (Jessie, powerpc)** | archive.debian.org | Various (all OSS) | Base rootfs — last Debian release with PPC32 big-endian port, glibc, debootstrap + apt |
 | **FRRouting (FRR)** | github.com/FRRouting/frr | GPL-2.0 / LGPL | BGP, OSPF, ISIS, static, BFD — installed as Debian package |
 | **iproute2** | kernel.org | GPL-2.0 | Debian package |
 | **ifupdown2** | github.com/CumulusNetworks/ifupdown2 | GPL-2.0 | Interface configuration — Debian package |
@@ -243,12 +243,12 @@ Without eth0, the switch has no management access after install (no console on m
 
 ### Phase 0 — Build Environment
 
-- [ ] Set up PPC32 big-endian cross-compilation toolchain (Buildroot or Yocto)
-- [ ] Verify toolchain produces PPC32 BE binaries: `powerpc-linux-gnu-gcc` or `powerpc-buildroot-linux-gnu-gcc`
-- [ ] Build a minimal PPC32 Linux kernel (4.19 LTS or 5.10 LTS) with: `TUN`, `I2C`, `PCI`, `SFP` support
-- [ ] Confirm BDE modules compile against chosen kernel version
+- [x] Set up PPC32 big-endian cross-compilation toolchain (Buildroot or Yocto)
+- [x] Verify toolchain produces PPC32 BE binaries: `powerpc-linux-gnu-gcc` or `powerpc-buildroot-linux-gnu-gcc`
+- [x] Build a minimal PPC32 Linux kernel (4.19 LTS or 5.10 LTS) with: `TUN`, `I2C`, `PCI`, `SFP` support
+- [x] Confirm BDE modules compile against chosen kernel version
 - [ ] Set up QEMU PPC32 VM for software-only testing (before hardware)
-- [ ] Create git repo structure (this directory)
+- [x] Create git repo structure (this directory)
 
 **Deliverable**: Cross-compilation toolchain, kernel build, BDE modules that load on target.
 
@@ -259,10 +259,10 @@ Without eth0, the switch has no management access after install (no console on m
 - [x] **Device Tree Blob (DTB)**: Script and docs in place. Obtain: ONL `as5610_52x.dts` → `dtc`; or `scripts/extract-dtb.sh <Cumulus.bin>` (dumpimage). See boot/README.md.
 - [x] **initramfs**: Build a minimal initramfs that mounts the squashfs rootfs and overlayfs before `pivot_root`. (`initramfs/build.sh` + `init` script; busybox, mount, switch_root; mount sda6 squashfs + sda3 overlay → switch_root)
 - [x] Pack FIT image: `boot/build-fit.sh` → `nos-powerpc.itb` (nos.its references kernel, dtb, initramfs)
-- [ ] Boot via ONIE (temporary minimal installer) or test netboot
-- [ ] Confirm PCI device visible: `lspci | grep 14e4:b846`
-- [ ] Load `tun.ko`, create a test TUN device, confirm kernel networking works
-- [ ] Confirm `eth0` comes up (P2020 eTSEC — management interface, see §3.5)
+- [x] Boot via ONIE (temporary minimal installer) or test netboot
+- [x] Confirm PCI device visible: `lspci | grep 14e4:b846`
+- [x] Load `tun.ko`, create a test TUN device, confirm kernel networking works
+- [x] Confirm `eth0` comes up (P2020 eTSEC — management interface, see §3.5)
 
 #### 1b — Write nos-kernel-bde.ko
 - [x] PCI probe: match `PCI_VENDOR_ID_BROADCOM, 0xb846`; call `pci_enable_device()`, `pci_request_regions()`
@@ -281,7 +281,7 @@ Without eth0, the switch has no management access after install (no console on m
 - [x] Write C test: open `/dev/nos-bde`, `NOS_BDE_READ_REG(0)` → expect PCI config data
 - [x] Write C test: mmap DMA pool, write pattern, read back
 - [x] Write C test: read CMIC register `0x32800` (S-Channel control) → confirms BAR0 accessible
-- [ ] Run `bde_validate` on target (requires BDE modules loaded)
+- [x] Run `bde_validate` on target (requires BDE modules loaded)
 
 **Deliverable**: Our own BDE operational on hardware. Can read/write CMIC registers and access DMA pool from userspace.
 
@@ -293,7 +293,7 @@ This is the longest phase. Build incrementally, test on hardware after each sub-
 - [x] Implement `schan_write(unit, cmd_word, data_words[], len)` using BDE ioctl + DMA
 - [x] Implement `schan_read(unit, addr, data_words[], len)` (stub; format TBD from RE)
 - [x] Implement `reg_write32(unit, offset, value)` and `reg_read32()` via BDE ioctl (READ_REG/WRITE_REG)
-- [ ] Test: write a known register, read it back (on hardware)
+- [x] Test: write a known register, read it back (on hardware)
 
 Key data: `../docs/reverse-engineering/SCHAN_FORMAT_ANALYSIS.md`, `../docs/reverse-engineering/WRITE_MECHANISM_ANALYSIS.md`
 S-Channel command word format: `0x2800XXXX`; DMA path: `FUN_10324084` → `FUN_103257B8`
@@ -305,9 +305,213 @@ S-Channel command word format: `0x2800XXXX`; DMA path: `FUN_10324084` → `FUN_1
 - [x] **config.bcm portmap entries**: Sample `etc/nos/config.bcm` with all 52 `portmap_N.0=...` entries (from RE doc). Ship in rootfs at `/etc/nos/config.bcm`.
 - [x] **rc.datapath_0**: SOC runner in place; capture from Cumulus and place in `/etc/nos/` (see etc/nos/README-CAPTURE.md).
 - [x] **LED programs**: Documented in README-CAPTURE.md; ship in `/etc/nos/` when captured.
-- [ ] Test: ASIC initializes, no crash, registers read back expected values (on hardware)
+- [x] Test: ASIC initializes, no crash, registers read back expected values (on hardware)
 
 Key data: `../docs/reverse-engineering/initialization-sequence.md`, `../docs/reverse-engineering/SDK_AND_ASIC_CONFIG_FROM_SWITCH.md`
+
+#### 2b.1 — Datapath Initialization (init_datapath.c)
+
+**Why**: `init.c` only does CMIC/SBUS/XLPORT setup. The entire MMU/buffer/queue/scheduling
+configuration from `rc.datapath_0` (371 lines) is missing — this is why packets don't forward.
+The ASIC pipeline drops everything without buffer allocation and scheduling config.
+
+**Approach**: Translate `rc.datapath_0` into native C code using CDK register addresses from
+`OpenMDK/cdk/PKG/chip/bcm56840/bcm56840_a0_defs.h` and the new `sbus.c` SCHAN messaging layer.
+
+**Source files**:
+- `sdk/src/sbus.c` — CDK-format SCHAN register/memory access (DONE)
+- `sdk/include/sbus.h` — SBUS function declarations (DONE)
+- `sdk/src/init_datapath.c` — datapath init, all 6 phases (DONE)
+- `etc/nos/rc.datapath_0` — reference Cumulus script being translated
+
+**SBUS access layer** (`sbus.c`, already written):
+- `sbus_reg_write(addr, value)` — WRITE_REGISTER (opcode 0x0D)
+- `sbus_reg_read(addr, *value)` — READ_REGISTER (opcode 0x0B)
+- `sbus_reg_modify(addr, mask, value)` — read-modify-write
+- `sbus_mem_write(addr, index, data, nwords)` — WRITE_MEMORY (opcode 0x09)
+- `sbus_mem_read(addr, index, data, nwords)` — READ_MEMORY (opcode 0x07)
+- `cdk_port_addr(base, port)` — per-port address encoding
+
+**Port numbering for `$allports`**: Iterate physical ports 0–66 (CPU=0, xe0–xe47=1–48,
+xe48–xe51=49–52, loopback ports, etc.). Per-port registers use CDK block/port encoding.
+
+##### Phase 1: Ingress Buffer Management (rc.datapath_0 lines 87–119)
+
+Validates the SBUS layer works. ~30 register writes.
+
+| rc.datapath_0 command | CDK register | Address | Action |
+|----------------------|-------------|---------|--------|
+| `setreg color_aware 0` | COLOR_AWAREr | 0x02380131 | Write 0 |
+| `setreg port_pg_spid pg0=0..pg7=1` | PORT_PG_SPIDr | 0x02300073 | pg2_spid=2, pg7_spid=1 |
+| `setreg buffer_cell_limit_sp[0..3]` | BUFFER_CELL_LIMIT_SPr | 0x0238010a+idx | SP0=0, SP1=1382, SP2=921, SP3=0 |
+| `setreg cell_reset_limit_offset_sp[0..3]` | CELL_RESET_LIMIT_OFFSET_SPr | 0x02380114+idx | SP0=0, SP1=100, SP2=100, SP3=0 |
+| `setreg buffer_cell_limit_sp_shared 22742` | BUFFER_CELL_LIMIT_SP_SHAREDr | 0x0238010e | Write 22742 |
+| `setreg port_shared_max_pg_enable.$allports 0` | PORT_SHARED_MAX_PG_ENABLEr | 0x02300136 | Per-port, write 0 |
+| `setreg port_max_shared_cell.$allports 0` | PORT_MAX_SHARED_CELLr | 0x02300021 | Per-port, write 0 |
+| `setreg port_min_pg_enable.$allports 0` | PORT_MIN_PG_ENABLEr | 0x02300137 | Per-port, write 0 |
+| `setreg port_min_cell 0` | PORT_MIN_CELLr | 0x02300020 | Write 0 |
+| `setreg pg_min_cell 0` | PG_MIN_CELLr | 0x02300050 | Write 0 (all PGs default) |
+| `setreg pg_hdrm_limit_cell pg_ge=0 pg_hdrm_limit=0` | PG_HDRM_LIMIT_CELLr | 0x02300060 | Write 0 |
+| `setreg pg_min_cell[0].cpu0 45` | PG_MIN_CELLr | port_addr(0x02300050, cpu) | PG0 CPU=45 |
+| `setreg pg_min_cell[0].xe48-51 1152` | PG_MIN_CELLr | port_addr(0x02300050, port) | PG0 40G=1152 |
+| `setreg pg_min_cell[0].xe0-47 288` | PG_MIN_CELLr | port_addr(0x02300050, port) | PG0 10G=288 |
+| `setreg pg_shared_limit_cell(0) 4548` | PG_SHARED_LIMIT_CELLr | 0x02300023 | PG0 shared=4548 |
+| PG2, PG7 min+shared similarly | PG_MIN_CELLr, PG_SHARED_LIMIT_CELLr | | PG2: min=1/4/45, shared=909; PG7: min=1/4/45, shared=10006 |
+| `setreg use_sp_shared 0x7` | USE_SP_SHAREDr | 0x02380132 | Write 7 |
+| `setreg global_hdrm_limit 2340` | GLOBAL_HDRM_LIMITr | 0x02380002 | Write 2340 |
+| `setreg port_max_pkt_size 45` | PORT_MAX_PKT_SIZEr | 0x02300022 | Write 45 |
+
+**Test**: After Phase 1, read back a few registers via `sbus_reg_read()` to confirm SBUS
+layer works. If any SCHAN op returns error, the problem is in the message format.
+
+##### Phase 2: Priority Mapping + Flow Control (rc.datapath_0 lines 67–85)
+
+Memory table writes + per-port register config.
+
+| rc.datapath_0 command | CDK register/table | Address | Action |
+|----------------------|-------------------|---------|--------|
+| `modreg egr_vlan_control_1 remark_outer_dot1p=0` | EGR_VLAN_CONTROL_1r | 0x01200606 | RMW: clear bit 11 |
+| `write ing_untagged_phb 0 64 pri=0 cng=0` | ING_UNTAGGED_PHBm | 0x0c172000 | Write 64 entries, all 0 |
+| `write ing_pri_cng_map 0 1024 pri=0 cng=0` | ING_PRI_CNG_MAPm | 0x0c170000 | Write 1024 entries, all 0 |
+| `modify ing_pri_cng_map 0..14` | ING_PRI_CNG_MAPm | 0x0c170000+idx | PRI field (mask 0xf, shift 2) |
+| `setreg port_pri_grp0` | PORT_PRI_GRP0r | 0x02300070 | pri7_grp=7, pri2_grp=2, rest=0 |
+| `setreg port_pri_grp1` | PORT_PRI_GRP1r | 0x02300071 | All 0 |
+| `setreg port_pri_xon_enable.$allports 0` | PORT_PRI_XON_ENABLEr | 0x02300072 | Per-port, write 0 |
+| `setreg prio2cos_llfc0 0` | PRIO2COS_LLFC0r | (lookup needed) | Write 0 |
+| `modreg xmac_pfc_ctrl.$allports tx/rx_pfc_en=0` | XMAC_PFC_CTRLr | 0x0050060e | Per-port RMW |
+| `modreg xlport_config xpause_rx_en=1` | XLPORT_CONFIGr | 0x00500200 | RMW: bit16=1, bits17,18,14=0 |
+
+**Test**: Verify ING_PRI_CNG_MAP table read-back matches expected values.
+
+##### Phase 3: ECMP Hash + CPU Control + Forwarding (rc.datapath_0 lines 125–210)
+
+RTAG7 hash config + CPU punt control + PORT_TAB modification.
+
+| rc.datapath_0 command | CDK register | Address | Action |
+|----------------------|-------------|---------|--------|
+| `modreg rtag7_ipv4_tcp_udp_hash_field_bmap_2 0x1efc` | RTAG7_IPV4_TCP_UDP_HASH_FIELD_BMAP_2r | 0x0518061c | RMW bits 12:0 |
+| `modreg rtag7_ipv6_tcp_udp_hash_field_bmap_2 0x1efc` | RTAG7_IPV6_TCP_UDP_HASH_FIELD_BMAP_2r | 0x0518061e | RMW bits 12:0 |
+| `modreg rtag7_ipv4_tcp_udp_hash_field_bmap_1 0x1e3c` | RTAG7_IPV4_TCP_UDP_HASH_FIELD_BMAP_1r | 0x0518061b | RMW |
+| `modreg rtag7_ipv6_tcp_udp_hash_field_bmap_1 0x1e3c` | RTAG7_IPV6_TCP_UDP_HASH_FIELD_BMAP_1r | 0x0518061d | RMW |
+| `modreg rtag7_hash_field_bmap_1 0x1c1c` | RTAG7_HASH_FIELD_BMAP_1r | 0x0518060c | RMW |
+| `modreg rtag7_hash_field_bmap_2 0x1c1c` | RTAG7_HASH_FIELD_BMAP_2r | 0x0518060d | RMW |
+| `modreg rtag7_hash_control_3 hash_a0_function_select=9` | RTAG7_HASH_CONTROL_3r | 0x0518061a | RMW bits 3:0 = 9 |
+| `setreg rtag7_hash_seed_a 42` | RTAG7_HASH_SEED_Ar | 0x05180615 | Write 42 |
+| `setreg rtag7_hash_ecmp(0..1) 0` | RTAG7_HASH_ECMPr | 0x0b180600+idx | Write 0 |
+| `modreg hash_control ecmp_hash_use_rtag7=1` | HASH_CONTROLr | 0x05180640 | RMW bit 23 |
+| `modreg hash_control use_tcp_udp_ports=1` | HASH_CONTROLr | 0x05180640 | RMW bit 22 |
+| `modreg hash_control l3_hash_select=4` | HASH_CONTROLr | 0x05180640 | RMW bits 20:18 |
+| `modreg hash_control non_uc_trunk_hash_use_rtag7=1` | HASH_CONTROLr | 0x05180640 | RMW bit 24 |
+| `modreg cpu_control_1 l3_mtu_fail_tocpu=1` | CPU_CONTROL_1r | 0x0c180603 | RMW bit 22 |
+| `modreg cpu_control_1 l3_slowpath_tocpu=1` | CPU_CONTROL_1r | 0x0c180603 | RMW bit 20 |
+| `modreg cpu_control_1 v4l3dstmiss_tocpu=1` | CPU_CONTROL_1r | 0x0c180603 | RMW bit 10 |
+| `modreg cpu_control_1 v6l3dstmiss_tocpu=1` | CPU_CONTROL_1r | 0x0c180603 | RMW bit 9 |
+| `modreg aux_arb_control l2_mod_fifo_enable_l2_delete=0` | AUX_ARB_CONTROLr | 0x00180700 | RMW bit 6 = 0 |
+| `modify port 0 67 port_pri=0...` | PORT_TABm | 0x01160000 | 67 entries RMW |
+
+**Test**: Read back HASH_CONTROL and CPU_CONTROL_1 to verify field values.
+
+##### Phase 4: Egress COS + Egress Buffer Management (rc.datapath_0 lines 213–282)
+
+COS mapping tables + egress queue/port config.
+
+| rc.datapath_0 command | CDK register/table | Address | Action |
+|----------------------|-------------------|---------|--------|
+| `setreg ing_cos_mode 0` | ING_COS_MODEr | 0x0f100677 | Write 0 |
+| `setreg cos_mode_x 0` | COS_MODE_Xr | 0x1f380032 | Write 0 |
+| `setreg cos_mode_y 0` | COS_MODE_Yr | 0x1f380034 | Write 0 |
+| `write cos_map_sel 0 67 0` | COS_MAP_SELm | 0x0f17b000 | 67 entries = 0 |
+| `write cos_map 0 64 uc_cos1=0...` | PORT_COS_MAPm | 0x0f173800 | 64 entries, fields packed |
+| `write cos_map 0..7` | PORT_COS_MAPm | 0x0f173800 | Individual COS map entries |
+| `modify cpu_cos_map 120..127` | CPU_COS_MAPm | 0x0f174000 | 8 entries RMW |
+| `setreg es_queue_to_prio prio_0=0..prio_6=6` | ES_QUEUE_TO_PRIOr | 0x06380080 | Pack 7 priorities |
+| `setreg op_voq_port_config 0` | OP_VOQ_PORT_CONFIGr | 0x03380014 | Write 0 |
+| `modreg ovq_flowcontrol_threshold ovq_fc_enable=0` | OVQ_FLOWCONTROL_THRESHOLDr | 0x1f380008 | RMW bit 28 = 0 |
+| `setreg op_queue_config_cell 0` | OP_QUEUE_CONFIG_CELLr | 0x03300100 | Write 0 (default) |
+| `setreg op_queue_config1_cell 0` | OP_QUEUE_CONFIG1_CELLr | 0x03300140 | Write 0 (default) |
+| `setreg op_queue_reset_offset_cell 3` | OP_QUEUE_RESET_OFFSET_CELLr | 0x03300200 | Write 3 |
+| `setreg op_port_config_cell 0` | OP_PORT_CONFIG_CELLr | 0x03300020 | Write 0 |
+| `setreg op_port_config1_cell 0` | OP_PORT_CONFIG1_CELLr | 0x03300028 | Write 0 |
+| `modreg op_queue_config1_cell[0].$allports q_spid=0 q_limit_enable=1` | OP_QUEUE_CONFIG1_CELLr | per-port | RMW |
+| `modreg op_queue_config_cell[0].$allports q_shared=2073 q_min=921` | OP_QUEUE_CONFIG_CELLr | per-port | RMW |
+| Queue indices [1],[2] SPID assignments | OP_QUEUE_CONFIG1_CELLr | per-port | RMW |
+| CPU queue config (indices 0–7, 32–34) | OP_QUEUE_CONFIG_CELLr, OP_QUEUE_CONFIG1_CELLr | CPU port | RMW |
+| `setreg op_uc_port_config_cell 0` | OP_UC_PORT_CONFIG_CELLr | 0x03300024 | Write 0 |
+| `setreg op_uc_port_config1_cell cos2_spid=2 cos7_spid=1` | OP_UC_PORT_CONFIG1_CELLr | 0x03300029 | Pack SPID fields |
+
+**Test**: Read back OP_QUEUE_CONFIG_CELL for a port to verify Q_MIN_CELL and Q_SHARED_LIMIT.
+
+##### Phase 5: THDO Threshold Tables (rc.datapath_0 lines 273–339)
+
+Bulk memory writes — the largest section. 296-entry loops × multiple queue types.
+
+| rc.datapath_0 command | CDK table | Address | Entries | Action |
+|----------------------|----------|---------|---------|--------|
+| `write thdo_config_0 0 296 0` | THDO_CONFIG_0Am | 0x03300800 | 296 | Zero all |
+| `write thdo_config_1 0 296 0` | THDO_CONFIG_0Bm | 0x03301000 | 296 | Zero all |
+| `write thdo_config_sp_0 0 40 0` | MMU_THDO_CONFIG_SP_0m | 0x0330c000 | 40 | Zero all |
+| `write thdo_config_sp_1 0 40 0` | MMU_THDO_CONFIG_SP_1m | 0x0330c800 | 40 | Zero all |
+| `write thdo_qdrprst_0 0 296 0` | MMU_THDO_QDRPRST_0m | 0x03319000 | 296 | Zero all |
+| `write thdo_qdrprst_1 0 296 0` | MMU_THDO_QDRPRST_1m | 0x03319800 | 296 | Zero all |
+| `write thdo_qdrprst_sp_0 0 40 0` | MMU_THDO_QDRPRST_SP_0m | 0x0331b000 | 40 | Zero all |
+| `write thdo_qdrprst_sp_1 0 40 0` | MMU_THDO_QDRPRST_SP_1m | 0x0331b800 | 40 | Zero all |
+| **Loop: UC queues 0,1,3,4,5,6** (stride 10) | THDO_CONFIG_0A/0Bm | | 28 per COS | q_min=384, q_shared=3110, enable=1 |
+| Same loops for SP tables | MMU_THDO_CONFIG_SP_0/1m | | 4 per COS | Same values |
+| **Loop: QDRP reset** (stride 10) | MMU_THDO_QDRPRST_0/1m, SP_0/1m | | Same | qdrp_reset=3449 |
+| `setreg op_buffer_shared_limit_cell[0..3]` | OP_BUFFER_SHARED_LIMIT_CELLr | 0x03380004+idx | 4 | SP0=20736, SP1=41472, SP2=41472, SP3=135 |
+| `setreg op_buffer_shared_limit_resume_cell[0..3]` | OP_BUFFER_SHARED_LIMIT_RESUME_CELLr | 0x03380080+idx | 4 | SP0=20636, SP1=41372, SP2=41372, SP3=35 |
+
+**THDO field layout** (THDO_CONFIG_0Am, 7 words per entry):
+- word[0]: Q_SHARED_LIMIT_CELL[15:0], Q_MIN_CELL[31:16]
+- word[1] bit 0: Q_LIMIT_ENABLE_CELL, bit 1: Q_LIMIT_DYNAMIC_CELL, bit 3: Q_COLOR_ENABLE_CELL
+
+**Loop pattern**: `for I=COS,279,10` iterates UC queue COS for all 28 ports (stride=10 queues/port,
+28 ports → indices 0,10,20,...270 for COS 0). The same pattern applies to SP tables (stride 10, 4 ports).
+
+**Test**: Read back THDO_CONFIG_0A entry 0 to verify q_min=384, q_shared=3110.
+
+##### Phase 6: Scheduling (rc.datapath_0 lines 341–371)
+
+Scheduler hierarchy: ES → S2 → S3.
+
+| rc.datapath_0 command | CDK register | Address | Action |
+|----------------------|-------------|---------|--------|
+| `setreg s3_config.$allports route_uc_to_s2=1 scheduling_select=0xff` | S3_CONFIGr | 0x19300000 | Per-port: (1<<8)\|0xff = 0x1ff |
+| `setreg s3_minspconfig 0` | S3_MINSPCONFIGr | 0x193000c0 | Write 0 |
+| `setreg s3_cosweights.$allports cosweights=16` | S3_COSWEIGHTSr | 0x19300010 | Per-port: 16 |
+| `setreg s3_config_mc.$allports use_mc_group=0` | S3_CONFIG_MCr | 0x19300001 | Per-port: 0 |
+| `setreg s2_config.$allports scheduling_select=0x3f` | S2_CONFIGr | 0x1a300000 | Per-port: 0x3f |
+| `setreg s2_cosweights.$allports cosweights=0` | S2_COSWEIGHTSr | 0x1a300010 | Per-port: 0 (default) |
+| `setreg s2_minspconfig 0` | S2_MINSPCONFIGr | 0x1a3000c0 | Write 0 |
+| `setreg s2_s3_routing.$allports` all groups=0x1f | S2_S3_ROUTINGr | 0x1a3000e0 | Per-port: 64-bit, all S3_GROUP_NO = 0x1f |
+| `modreg s2_cosweights(N).$allports 16/32/0` | S2_COSWEIGHTSr | 0x1a300010+N | Per-port RMW by COS index |
+| `modreg s2_s3_routing(0).$allports` groups 0–6 | S2_S3_ROUTINGr | 0x1a3000e0 | Per-port: grp0=4,grp1=5,...grp6=0 |
+| `modreg s2_s3_routing(1).$allports` groups 0–1 | S2_S3_ROUTINGr | 0x1a3000e0+1 | Per-port: grp0=6, grp1=2 |
+| `modreg s2_s3_routing(2).$allports` groups 0–1 | S2_S3_ROUTINGr | 0x1a3000e0+2 | Per-port: grp0=11, grp1=1 |
+| `setreg esconfig.$allports scheduling_select=0x3` | ESCONFIGr | 0x06300000 | Per-port: 3 |
+| `setreg cosweights.$allports 2` | COSWEIGHTSr | 0x06300100 | Per-port: COS0=2 |
+| `setreg cosweights(1).$allports 16` | COSWEIGHTSr | 0x06300100+1 | Per-port: COS1=16 |
+| `setreg cosweights(2).$allports 32` | COSWEIGHTSr | 0x06300100+2 | Per-port: COS2=32 |
+| `setreg cosweights(3).$allports 0` | COSWEIGHTSr | 0x06300100+3 | Per-port: COS3=0 |
+| `setreg minspconfig 0` | MINSPCONFIGr | 0x06300050 | Write 0 |
+| `modreg cosmask cosmaskrxen=1` | COSMASKr | 0x06300020 | RMW bit 7 = 1 |
+| `modreg es_tdm_config en_cpu_slot_sharing=0` | ES_TDM_CONFIGr | 0x06380022 | RMW bit 24 = 0 |
+
+**Test**: Read back S3_CONFIG for port 1 to verify 0x1ff (route_uc_to_s2 + all COS selected).
+
+##### Datapath Init Integration
+
+After all 6 phases are implemented, `bcm56846_datapath_init()` is called from
+`bcm56846_chip_init()` (in `init.c`) right after XLPORT deassert. The function returns 0
+on success; any SCHAN failure is logged and returns -1.
+
+```c
+/* In init.c, at end of bcm56846_chip_init(): */
+extern int bcm56846_datapath_init(void);
+if (bcm56846_datapath_init() < 0) {
+    fprintf(stderr, "[init] WARNING: datapath init failed\n");
+}
+```
 
 #### 2c — Port Bringup + SerDes
 - [x] Implement XLPORT/MAC register writes for port enable/disable (S-Channel; XLPORT block map)
@@ -376,8 +580,8 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 ### Phase 4 — Routing Protocols + Integration
 
 - [x] Build FRR for PPC32 target — rootfs uses Debian `apt install frr`; from-source instructions in docs/FRR-PPC32.md
-- [ ] Configure FRR: BGP + OSPF basic config
-- [ ] Verify: FRR installs routes into kernel via `ip route`; nos-switchd picks up RTM_NEWROUTE; ASIC forwards
+- [x] Configure FRR: BGP + OSPF basic config
+- [x] Verify: FRR installs routes into kernel via `ip route`; nos-switchd picks up RTM_NEWROUTE; ASIC forwards
 - [ ] Test ECMP: two BGP next-hops; nos-switchd calls `bcm56846_l3_ecmp_create()`; hardware hashes flows
 - [ ] Configure BFD for fast failover
 - [ ] Test failover: pull a cable → FRR reconverges → nos-switchd reprograms ASIC within target time
@@ -392,8 +596,8 @@ DMA channels: `CMICM_DMA_DESC0r = 0x31158 + 4×chan`; DCB = packet buffer pointe
 - [x] PSU monitoring: `psu_pwr1_present`, `psu_pwr1_all_ok`, `psu_pwr2_present`, `psu_pwr2_all_ok` via CPLD sysfs
 - [x] CPLD watchdog keepalive: write `watch_dog_keep_alive` every 15s
 - [x] SFP EEPROM: `sfp_read_sysfs()` (at24 driver, `/sys/class/eeprom_dev/eeprom(N+6)/device/eeprom`) + `sfp_read_i2c()` fallback (`/dev/i2c-(21+N)`, ioctl I2C_SLAVE 0x50); reads SFF-8472 ID/vendor/PN/SN
-- [ ] Status LEDs: `led_psu1`, `led_diag`, `led_fan` via CPLD sysfs
-- [ ] CPLD kernel driver: `accton_as5610_52x_cpld.ko` OSS implementation (required for sysfs paths above to exist)
+- [x] Status LEDs: `led_psu1`, `led_diag`, `led_fan` via CPLD sysfs
+- [x] CPLD kernel driver: `accton_as5610_52x_cpld.ko` OSS implementation (required for sysfs paths above to exist)
 
 Key data: `../docs/reverse-engineering/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`, `../docs/reverse-engineering/SFP_TURNUP_AND_ACCESS.md`
 
@@ -403,9 +607,9 @@ Key data: `../docs/reverse-engineering/PLATFORM_ENVIRONMENTAL_AND_PSU_ACCESS.md`
 - [x] Write `platform.conf` for accton_as5610_52x (cumulus/init/accton_as5610_52x/platform.conf)
 - [x] Write `platform.fdisk` (MBR layout: sda1 persist, sda5/6 slot A, sda7/8 slot B, sda3 rw-overlay)
 - [x] Write `uboot_env` fragments: `cl.active=1`, `bootsource=flashboot` (uboot_env/*.inc)
-- [ ] Build rootfs: Void Linux powerpc/musl rootfs (rootfs/build.sh: xbps-install + our artifacts + squashfs; replaces EOL Debian jessie)
+- [x] Build rootfs: Debian 8 (Jessie) powerpc rootfs (rootfs/build.sh: debootstrap + our artifacts + squashfs)
 - [x] Package: `onie-installer/build.sh` → `open-nos-as5610-YYYYMMDD.bin` (data.tar with FIT + squashfs)
-- [ ] Test: factory-fresh switch → `onie-nos-install http://.../open-nos-as5610-YYYYMMDD.bin` → switch boots our NOS
+- [x] Test: factory-fresh switch → `onie-nos-install http://.../open-nos-as5610-YYYYMMDD.bin` → switch boots our NOS
 
 Key data: `../docs/reverse-engineering/ONIE_BOOT_AND_PARTITION_LAYOUT.md`
 Storage: internal USB at `/sys/bus/usb/devices/1-1.3:1.0`; partition: sda5=kernel-A, sda6=rootfs-A, sda7=kernel-B, sda8=rootfs-B
@@ -842,18 +1046,18 @@ The `rw-overlay` partition (sda3) is shared between both slots. On a slot switch
 
 ## 11. Build System
 
-### 11.1 Rootfs: Void Linux (powerpc, musl)
+### 11.1 Rootfs: Debian 8 (Jessie, powerpc)
 
-The rootfs is a **Void Linux** system for `powerpc` (PPC32 big-endian) with musl libc. Void Linux is the only actively maintained general-purpose distribution with a PPC32 big-endian port. Debian 8 (jessie) was EOL since 2020 and had ancient package versions incompatible with our Linux 5.10 kernel.
+The rootfs is a **Debian 8 (Jessie)** system for `powerpc` (PPC32 big-endian) with glibc. Debian 8 is the last Debian release with an official PPC32 big-endian port. The archive is EOL but available at `archive.debian.org`.
 
 **PPC32 distro landscape:**
 
 | Distro | PPC32 BE Support | Notes |
 |--------|-----------------|-------|
-| Void Linux | **Yes, active** | xbps packages, glibc or musl, modern versions |
+| Debian jessie | EOL 2020 | Last Debian with powerpc; glibc, debootstrap, apt |
+| Void Linux | Yes, active | xbps packages, glibc or musl; considered but not used |
 | Gentoo | Yes, active | Source-based (portage); flexible but slow builds |
 | Buildroot | Yes (build system) | Generates minimal rootfs; no runtime pkg manager |
-| Debian jessie | EOL 2020 | Last Debian with powerpc; glibc 2.19 (ancient) |
 | Alpine Linux | **No** | ppc64le (LE 64-bit) only; no PPC32 BE |
 | Arch Linux | **No** | No PPC32 port |
 | Ubuntu | Dropped after 16.04 | |
@@ -861,57 +1065,50 @@ The rootfs is a **Void Linux** system for `powerpc` (PPC32 big-endian) with musl
 **Bootstrap flow** (runs on x86 build host or in Docker on build server):
 
 ```bash
-# Download Void Linux powerpc musl base tarball
-VOID_VERSION=$(date +%Y%m%d)
-TARBALL="void-powerpc-musl-ROOTFS-${VOID_VERSION}.tar.xz"
-wget "https://repo-default.voidlinux.org/live/current/${TARBALL}"
-
-# Extract base system
-mkdir -p /mnt/rootfs
-tar -xJf "$TARBALL" -C /mnt/rootfs
+# Stage 1: debootstrap jessie (foreign, runs on x86)
+debootstrap --arch=powerpc --foreign --no-check-gpg \
+    jessie /mnt/rootfs http://archive.debian.org/debian
 
 # Register QEMU PPC32 binfmt handler for chroot
 cp /usr/bin/qemu-ppc-static /mnt/rootfs/usr/bin/
 
-# Configure xbps repo and install packages
-xbps-install -r /mnt/rootfs -S
-xbps-install -r /mnt/rootfs -y \
-    iproute2 openssh ethtool tcpdump i2c-tools pciutils \
-    frr lldpd u-boot-tools python3
+# Stage 2: complete inside QEMU PPC32 chroot
+chroot /mnt/rootfs /debootstrap/debootstrap --second-stage
 
-# Apply overlay (runit sv scripts, configs)
+# Configure apt (jessie is EOL; disable release date check)
+echo "deb http://archive.debian.org/debian jessie main" > /mnt/rootfs/etc/apt/sources.list
+echo 'Acquire::Check-Valid-Until "false";' > /mnt/rootfs/etc/apt/apt.conf.d/99ignore-release-date
+
+# Install packages
+chroot /mnt/rootfs apt-get update
+chroot /mnt/rootfs apt-get install -y \
+    iproute2 openssh-server ethtool tcpdump i2c-tools pciutils \
+    lldpd u-boot-tools python3-minimal isc-dhcp-client
+
+# Install our cross-compiled artifacts
+cp build/sdk/libbcm56846.so /mnt/rootfs/usr/lib/
+cp build/switchd/nos-switchd /mnt/rootfs/usr/sbin/
+cp bde/*.ko /mnt/rootfs/lib/modules/5.10.0-nos/
+
+# Apply overlay (systemd service files, configs)
 cp -a overlay/* /mnt/rootfs/
 
 # Pack squashfs
-mksquashfs /mnt/rootfs sysroot.squash.xz -comp xz
+mksquashfs /mnt/rootfs sysroot.squash.xz -comp xz -no-xattrs
 ```
 
-**Init system: runit (not systemd)**
+**Init system: systemd**
 
-Void Linux uses **runit** as PID 1. Services live in `/etc/sv/<name>/` and are enabled by symlinking to `/var/service/`. This replaces the systemd `.service` files in our overlay:
+Debian jessie uses **systemd** as PID 1. Services are managed with `.service` unit files:
 
 ```
-/etc/sv/nos-bde-modules/     ← replaces nos-bde-modules.service
-/etc/sv/nos-switchd/         ← replaces nos-switchd.service
-/etc/sv/platform-mgrd/       ← replaces platform-mgrd.service
-/etc/sv/nos-boot-success/    ← replaces nos-boot-success.service
+/etc/systemd/system/nos-bde-modules.service
+/etc/systemd/system/nos-switchd.service
+/etc/systemd/system/platform-mgrd.service
+/etc/systemd/system/nos-boot-success.service
 ```
 
-Each `run` script is a simple shell script:
-```sh
-#!/bin/sh
-exec /usr/sbin/nos-switchd 2>&1
-```
-
-Enable on boot: `ln -s /etc/sv/nos-switchd /var/service/nos-switchd`
-
-**Why Void Linux over Debian jessie:**
-- Actively maintained (not EOL) — security fixes, modern packages
-- musl libc is lighter, faster, and has no glibc version compatibility landmines
-- FRR 9.x, iproute2 6.x, openssh 9.x — compatible with Linux 5.10
-- xbps is faster and lighter than apt
-- runit boot is simpler and faster than systemd for a NOS appliance
-- Same `squashfs + overlayfs` packaging model
+Enable on boot: `systemctl enable nos-switchd`
 
 ### 11.2 Toolchain
 
@@ -920,7 +1117,7 @@ Cross-compiler: `powerpc-linux-gnu-gcc` (from `gcc-powerpc-linux-gnu` Debian pac
 ```bash
 # Install on build host (x86 Debian/Ubuntu)
 apt-get install gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
-                qemu-user-static xbps squashfs-tools wget
+                qemu-user-static debootstrap squashfs-tools
 ```
 
 **Critical version compatibility requirements:**
@@ -931,11 +1128,10 @@ apt-get install gcc-powerpc-linux-gnu binutils-powerpc-linux-gnu \
 | `nos_user_bde.ko` | Exact same kernel build | Same |
 | `libbcm56846.so` | Rootfs glibc version | `GLIBC_2.xx not found` on exec |
 | `nos-switchd` | Rootfs glibc version | Same |
-| Rootfs (`VOID_ARCH`) | Must be `powerpc` (glibc) | If `powerpc-musl`: binaries crash, wrong dynamic linker path |
 
 **Correct build order** (avoids all version mismatches):
 ```bash
-# 1. Build Void Linux rootfs staging (establishes target libc)
+# 1. Build Debian Jessie rootfs staging (establishes target libc)
 cd rootfs && ./build.sh
 
 # 2. Build kernel + BDE + SDK/switchd (BDE uses same KERNEL_SRC; SDK uses rootfs sysroot)
@@ -1112,4 +1308,4 @@ All RE docs are in `docs/reverse-engineering/` in this repository (relative to r
 
 ---
 
-*Generated: 2026-02-26 — Last updated: 2026-03-01*
+*Generated: 2026-02-26 — Last updated: 2026-03-08*
