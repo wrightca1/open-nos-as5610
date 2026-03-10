@@ -33,15 +33,16 @@
 #define POLL_INTERVAL_S     30      /* poll loop period (seconds) */
 #define WDT_KEEPALIVE_S     15      /* watchdog keepalive interval */
 
-/* Fan PWM (CPLD pwm1, scale 0-100 percent) vs temperature thresholds (millidegrees C).
- * pct_to_fan_speed() in the CPLD driver maps: >=100->MAX(0x1F), >=70->MID(0x15), >=40->MIN(0x0C) */
+/* Fan PWM thresholds (millidegrees C) and CPLD sysfs values.
+ * CPLD driver pwm1 sysfs scale: 0-248 (raw = sysfs/8, 5-bit 0-31).
+ * Target raw values: LOW=0x0C(12), MED=0x15(21), MAX=0x1F(31). */
 #define TEMP_LOW_MC         35000   /* < 35 C -> low fan */
 #define TEMP_MED_MC         45000   /* 35-45 C -> medium fan */
 #define TEMP_HIGH_MC        55000   /* > 55 C -> max fan + log warning */
-#define PWM_LOW             40      /* 40% -> FAN_SPEED_MIN (0x0C) */
-#define PWM_MED             70      /* 70% -> FAN_SPEED_MID (0x15) */
-#define PWM_HIGH            100     /* 100% -> FAN_SPEED_MAX (0x1F) */
-#define PWM_MAX             100     /* 100% -> FAN_SPEED_MAX (0x1F) */
+#define PWM_LOW             96      /* raw 12 (0x0C) ~39% */
+#define PWM_MED             168     /* raw 21 (0x15) ~68% */
+#define PWM_HIGH            248     /* raw 31 (0x1F) 100% */
+#define PWM_MAX             248     /* raw 31 (0x1F) 100% */
 
 /* ---- Hardware paths --------------------------------------------------- */
 #define CPLD_BASE       "/sys/devices/platform/ff705000.localbus/ea000000.cpld"
@@ -350,6 +351,9 @@ static void sfp_scan_all(void)
 int main(int argc, char **argv)
 {
 	(void)argc; (void)argv;
+
+	/* Force line-buffered stdout so output appears in journald */
+	setvbuf(stdout, NULL, _IOLBF, 0);
 
 	printf("platform-mgrd: starting (AS5610-52X; poll=%ds wdt=%ds)\n",
 		POLL_INTERVAL_S, WDT_KEEPALIVE_S);

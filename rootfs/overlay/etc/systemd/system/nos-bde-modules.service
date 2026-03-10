@@ -1,13 +1,14 @@
 [Unit]
-Description=Load NOS kernel modules (BCM56846 BDE + AS5610 CPLD)
+Description=Load NOS kernel modules (I2C mux + BCM56846 BDE + AS5610 CPLD)
 DefaultDependencies=no
 After=local-fs.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/nos_kernel_bde.ko'
-ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/nos_user_bde.ko'
+ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/i2c-mux-pca954x.ko || true'
+ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/nos_kernel_bde.ko || true'
+ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/nos_user_bde.ko || true'
 ExecStart=/bin/sh -c 'insmod /lib/modules/$(uname -r)/accton_as5610_cpld.ko || true'
 
 [Install]

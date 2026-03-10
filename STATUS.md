@@ -1,6 +1,6 @@
 # open-nos-as5610 — Build and Implementation Status
 
-**Last updated:** 2026-03-09
+**Last updated:** 2026-03-10
 
 ---
 
@@ -16,7 +16,7 @@
 | **Phase 1a DTB/initramfs/FIT** | ✅ In place | initramfs/build.sh, boot/build-fit.sh, real Cumulus DTB (boot/as5610_52x.dtb) |
 | **Rootfs** | ✅ Debian Jessie PPC32 | rootfs/build.sh — jessie from archive.debian.org (last Debian with powerpc); glibc 2.19 + systemd 215 compatible with Linux 5.10 |
 | **ONIE installer .bin** | ✅ Produced | 171MB; all NOS binaries included (nos-switchd, libbcm56846.so, BDE .ko, platform-mgrd); served at http://10.22.1.4:8000/ |
-| **Hardware validation** | 🟡 In progress | SCHAN, I2C, thermal, fans, CPLD all working. XMAC access confirmed working (XLPORT reset sequence). SerDes SIGDET confirmed on 3 PHYs. CL49 block lock pending (external peer). L2 flooding + VLAN 1 configured. |
+| **Hardware validation** | 🟡 In progress | SCHAN, I2C, thermal, fans, CPLD all verified working after reboot. I2C mux (PCA954x) loads at boot, hwmon sensors bind, thermal fan control active. XMAC access confirmed. SerDes SIGDET on 3 PHYs. CL49 block lock pending (firmware download). L2 flooding + VLAN 1 configured. |
 
 ---
 
@@ -51,7 +51,7 @@
 | install.sh | ✅ | Self-extracting, partitions, writes kernel+rootfs |
 | platform.conf | ✅ | accton_as5610_52x |
 | uboot_env | ✅ | cl.active, bootsource, cl.platform |
-| CPLD kernel driver | ⚠️ | No OSS driver yet; CPLD sysfs paths depend on running accton_as5610_52x_cpld.ko (from ONL or out-of-tree) |
+| CPLD kernel driver | ✅ | accton_as5610_cpld.ko built out-of-tree, loads at boot |
 | Hardware boot test | ✅ | Boots on AS5610-52X via ONIE |
 
 ---
@@ -65,7 +65,7 @@
 | SBUS ring map | ✅ | 0x204..0x220 programmed; ring map reads back 0x43052100/0x33333343 |
 | LINK40G_ENABLE | ✅ | 0x1c CMIC_MISC_CONTROL bit 0 set; required for XLMAC SBUS access |
 | I2C / thermal | ✅ | 70 buses, MAX1617+MAX6697 hwmon, SFP EEPROMs, PCA954x muxes |
-| CPLD / fans / PSU | ✅ | platform-mgrd: watchdog, thermal→PWM, PSU monitor |
+| CPLD / fans / PSU | ✅ | accton_as5610_cpld.ko loaded at boot; platform-mgrd: watchdog, thermal fan PWM (4 zones), PSU monitor, LED control. Verified across reboots. |
 | 52 TAP interfaces | ✅ | swp1..swp52 as TUN/TAP; verified via `ip link show` |
 | DS100DF410 retimer | ✅ | Unmuted; 3 SFPs with RX light → SIGDET on WARPcore PHYs 13,17,31 |
 | WARPcore MDIO | ✅ | MIIM CTRL=0x50, PARAM=0x158, ADDR=0x4A0; PRBS/HiGig2 cleared |
@@ -73,7 +73,7 @@
 | XLPORT/XMAC init | ✅ | xport_reset → XLPORT_MODE → PORT_ENABLE → XMAC_CONTROL; TX_CTRL reads 0xc802 |
 | VLAN 1 + STG | ✅ | VLAN_TABm, EGR_VLANm, STG_TABm configured; PORT_VID=1 default |
 | L2 flooding | ✅ | UNKNOWN_UCAST/MCAST_BLOCK_MASK zeroed (flood to all VLAN ports) |
-| CL49 block lock | 🟡 | Works in IEEE loopback; external signal never achieves lock |
+| CL49 block lock | 🟡 | Firmware download via UCMEM implemented but 8051 not starting (version=0); CL49 HiGig2 bits cleared; forced speed correct (0x29); BLOCK_LOCK not achieved in loopback or with external signal |
 | Port link (10G) | 🟡 | CL45 PCS link status implemented; pending valid 10G peer |
 | L2/L3 forwarding | ⏳ | Pending port link-up; ASIC datapath fully configured |
 
@@ -93,7 +93,7 @@ cold hardware power cycle (unplug + replug).
 | CL49 block lock (external) | IEEE loopback works, but external 10G signal never achieves CL49 lock | **Primary blocker for packet forwarding**; remote end may not send valid 64B/66B |
 | Retimer CDR never locks | DS100DF410 CDR status bit4=0 on all channels despite signal | May not be in active signal path; needs further investigation |
 | fw_setenv not working | Cannot set U-Boot env from NOS (MTD/CFI modules not loading) | Trigger ONIE via boot_count or U-Boot console |
-| CPLD sysfs driver | platform-mgrd opens `/sys/devices/…/ea000000.cpld/`; requires CPLD .ko | Working with accton_as5610_52x_cpld.ko from ONL tree |
+| CPLD sysfs driver | platform-mgrd opens `/sys/devices/…/ea000000.cpld/`; requires CPLD .ko | Working with accton_as5610_cpld.ko; loads at boot via nos-bde-modules.service |
 | IFP_METER_PARITY_CONTROLr | SCHAN write to 0x0a400000 fails; IFP block may not exist on BCM56846 | Non-critical; IFP meter parity is an optional errata workaround |
 | CMICe DMA CTRL model | CMIC_DMA_CTRL (0x100) is a single register with per-channel bit fields, not per-channel registers like CMICm | pktio.c CMICM_DMA_CTRL(ch) alias ignores channel — may need channel-aware bit manipulation |
 
@@ -117,12 +117,14 @@ cold hardware power cycle (unplug + replug).
 
 ### Phase 5 — Platform Management
 - [x] platform-mgrd: CPLD watchdog keepalive (15s, `watch_dog_keep_alive`)
-- [x] Thermal monitoring: scan `/sys/class/hwmon/hwmon*/tempN_input`, 4 PWM zones (35/45/55°C → 64/128/200/248 on 0-248 CPLD scale)
-- [x] Fan control: write `/sys/devices/ff705000.localbus/ea000000.cpld/pwm1`
+- [x] Thermal monitoring: scan `/sys/class/hwmon/hwmon*/tempN_input`, 4 PWM zones (35/45/55C thresholds, sysfs 96/168/248 on 0-248 scale)
+- [x] Fan control: write `/sys/devices/ff705000.localbus/ea000000.cpld/pwm1`; verified working across reboots with correct sysfs→CPLD raw scaling
 - [x] PSU monitor: `psu_pwr1_present`, `psu_pwr1_all_ok`, `psu_pwr2_*`
 - [x] SFP EEPROM: sysfs (`/sys/class/eeprom_dev/eeprom(N+6)/device/eeprom`) + I2C fallback (`/dev/i2c-(21+N)`, 0x50)
-- [ ] Status LEDs (`led_psu1`, `led_diag`, `led_fan` via CPLD sysfs)
-- [ ] CPLD kernel driver (accton_as5610_52x_cpld.ko OSS implementation)
+- [x] Status LEDs (`led_psu1`, `led_psu2`, `led_diag`, `led_fan` via CPLD sysfs) — driven by platform-mgrd based on PSU/fan health
+- [x] CPLD kernel driver (accton_as5610_cpld.ko) — built out-of-tree, loads at boot via nos-bde-modules.service
+- [x] I2C mux module (i2c-mux-pca954x.ko) — loads first in boot sequence; required for hwmon sensor binding
+- [x] Line-buffered stdout for journald logging (setvbuf fix)
 
 ### Phase 6 — ONIE installer
 - [x] install.sh (self-extracting), platform.conf, platform.fdisk, uboot_env, rootfs/build.sh (Debian jessie), onie-installer/build.sh → .bin

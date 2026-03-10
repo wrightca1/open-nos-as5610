@@ -21,11 +21,13 @@
 #define SCHAN_READ_MEM_CMD   0x07u
 #define SCHAN_WRITE_MEM_CMD  0x09u
 
-/* Build SCHAN header word */
+/* Build SCHAN header word.
+ * dwords: data word count (number of 32-bit data words, NOT byte count).
+ * CDK field name: V2_SCHAN_MSG_DWC at bits [13:7]. */
 static inline uint32_t schan_header(uint32_t opcode, uint32_t dstblk,
-				    uint32_t datalen)
+				    uint32_t dwords)
 {
-	return (opcode << 26) | (dstblk << 20) | (0u << 14) | (datalen << 7);
+	return (opcode << 26) | (dstblk << 20) | (0u << 14) | (dwords << 7);
 }
 
 /* Extract SBUS block number from CDK address */
@@ -55,7 +57,7 @@ int sbus_reg_write(uint32_t addr, uint32_t value)
 	uint32_t cmd[3];
 	int status = -1;
 
-	cmd[0] = schan_header(SCHAN_WRITE_REG_CMD, cdk_addr_to_block(addr), 4);
+	cmd[0] = schan_header(SCHAN_WRITE_REG_CMD, cdk_addr_to_block(addr), 1);
 	cmd[1] = addr;
 	cmd[2] = value;
 
@@ -76,7 +78,7 @@ int sbus_reg_read(uint32_t addr, uint32_t *value)
 	uint32_t resp[2] = {0, 0};
 	int status = -1;
 
-	cmd[0] = schan_header(SCHAN_READ_REG_CMD, cdk_addr_to_block(addr), 4);
+	cmd[0] = schan_header(SCHAN_READ_REG_CMD, cdk_addr_to_block(addr), 1);
 	cmd[1] = addr;
 
 	if (bde_schan_op(cmd, 2, resp, 2, &status) < 0 || status != 0) {
@@ -114,6 +116,7 @@ int sbus_reg_modify(uint32_t addr, uint32_t mask, uint32_t value)
 int sbus_mem_write(uint32_t addr, int index, const uint32_t *data, int nwords)
 {
 	uint32_t cmd[16]; /* header + address + up to 14 data words */
+	uint32_t resp[2] = {0, 0}; /* response header for error checking */
 	int status = -1;
 	int i;
 
@@ -121,14 +124,20 @@ int sbus_mem_write(uint32_t addr, int index, const uint32_t *data, int nwords)
 		nwords = 14; /* header+addr+14 = 16 = ioctl cmd[] limit */
 
 	cmd[0] = schan_header(SCHAN_WRITE_MEM_CMD, cdk_addr_to_block(addr),
-			      (uint32_t)(nwords * 4));
+			      (uint32_t)nwords);
 	cmd[1] = addr + (uint32_t)index;
 	for (i = 0; i < nwords; i++)
 		cmd[2 + i] = data[i];
 
-	if (bde_schan_op(cmd, 2 + nwords, NULL, 0, &status) < 0 || status != 0) {
+	if (bde_schan_op(cmd, 2 + nwords, resp, 1, &status) < 0 || status != 0) {
 		fprintf(stderr, "[sbus] mem_write FAIL addr=0x%08x idx=%d status=%d\n",
 			addr, index, status);
+		return -1;
+	}
+	/* Check response header for ERR (bit 6) or NACK (bit 0) */
+	if (resp[0] & 0x0041u) {
+		fprintf(stderr, "[sbus] mem_write RESP_ERR addr=0x%08x idx=%d "
+			"resp=0x%08x\n", addr, index, resp[0]);
 		return -1;
 	}
 	return 0;
@@ -148,7 +157,7 @@ int sbus_mem_read(uint32_t addr, int index, uint32_t *data, int nwords)
 		nwords = 14; /* response header+14 = 15 within data[16] */
 
 	cmd[0] = schan_header(SCHAN_READ_MEM_CMD, cdk_addr_to_block(addr),
-			      (uint32_t)(nwords * 4));
+			      (uint32_t)nwords);
 	cmd[1] = addr + (uint32_t)index;
 
 	if (bde_schan_op(cmd, 2, resp, 1 + nwords, &status) < 0 || status != 0) {
@@ -163,6 +172,95 @@ int sbus_mem_read(uint32_t addr, int index, uint32_t *data, int nwords)
 }
 
 /*
+ * sbus_mem_write_blk: Write a memory entry with explicit block override.
+ *   block: SBUS destination block number (not derived from addr)
+ *   addr: CDK memory base address (sub-block bits in [23:20] select
+ *         the memory within the block, e.g. 0x00500000 for UCMEM_DATAm)
+ *   index: table entry index
+ *   data: pointer to data words
+ *   nwords: number of 32-bit words
+ *
+ * This is needed when the block number and memory address have conflicting
+ * bits (e.g. XLPORT block 22 with UCMEM_DATAm at 0x00500000).
+ */
+int sbus_mem_write_blk(uint32_t block, uint32_t addr, int index,
+		       const uint32_t *data, int nwords)
+{
+	uint32_t cmd[16];
+	uint32_t resp[2] = {0, 0};
+	int status = -1;
+	int i;
+
+	if (nwords > 14)
+		nwords = 14;
+
+	cmd[0] = schan_header(SCHAN_WRITE_MEM_CMD, block, (uint32_t)nwords);
+	cmd[1] = addr + (uint32_t)index;
+	for (i = 0; i < nwords; i++)
+		cmd[2 + i] = data[i];
+
+	if (bde_schan_op(cmd, 2 + nwords, resp, 1, &status) < 0 || status != 0) {
+		fprintf(stderr, "[sbus] mem_write_blk FAIL blk=%u addr=0x%08x "
+			"idx=%d status=%d\n", block, addr, index, status);
+		return -1;
+	}
+	if (resp[0] & 0x0041u) {
+		fprintf(stderr, "[sbus] mem_write_blk RESP_ERR blk=%u "
+			"addr=0x%08x idx=%d resp=0x%08x\n",
+			block, addr, index, resp[0]);
+		return -1;
+	}
+	return 0;
+}
+
+/*
+ * sbus_mem_read_blk: Read a memory entry with explicit block override.
+ */
+int sbus_mem_read_blk(uint32_t block, uint32_t addr, int index,
+		      uint32_t *data, int nwords)
+{
+	uint32_t cmd[2];
+	uint32_t resp[16] = {0};
+	int status = -1;
+	int i;
+
+	if (nwords > 14)
+		nwords = 14;
+
+	cmd[0] = schan_header(SCHAN_READ_MEM_CMD, block, (uint32_t)nwords);
+	cmd[1] = addr + (uint32_t)index;
+
+	if (bde_schan_op(cmd, 2, resp, 1 + nwords, &status) < 0 || status != 0) {
+		fprintf(stderr, "[sbus] mem_read_blk FAIL blk=%u addr=0x%08x "
+			"idx=%d status=%d\n", block, addr, index, status);
+		return -1;
+	}
+	for (i = 0; i < nwords; i++)
+		data[i] = resp[1 + i];
+	return 0;
+}
+
+/*
+ * sbus_reg_write_blk: Write a 32-bit SOC register with explicit block override.
+ */
+int sbus_reg_write_blk(uint32_t block, uint32_t addr, uint32_t value)
+{
+	uint32_t cmd[3];
+	int status = -1;
+
+	cmd[0] = schan_header(SCHAN_WRITE_REG_CMD, block, 1);
+	cmd[1] = addr;
+	cmd[2] = value;
+
+	if (bde_schan_op(cmd, 3, NULL, 0, &status) < 0 || status != 0) {
+		fprintf(stderr, "[sbus] reg_write_blk FAIL blk=%u addr=0x%08x "
+			"val=0x%08x status=%d\n", block, addr, value, status);
+		return -1;
+	}
+	return 0;
+}
+
+/*
  * sbus_reg_write64: Write a 64-bit SOC register (2 data words).
  */
 int sbus_reg_write64(uint32_t addr, const uint32_t *data)
@@ -170,7 +268,7 @@ int sbus_reg_write64(uint32_t addr, const uint32_t *data)
 	uint32_t cmd[4];
 	int status = -1;
 
-	cmd[0] = schan_header(SCHAN_WRITE_REG_CMD, cdk_addr_to_block(addr), 8);
+	cmd[0] = schan_header(SCHAN_WRITE_REG_CMD, cdk_addr_to_block(addr), 2);
 	cmd[1] = addr;
 	cmd[2] = data[0];
 	cmd[3] = data[1];
@@ -192,7 +290,7 @@ int sbus_reg_read64(uint32_t addr, uint32_t *data)
 	uint32_t resp[3] = {0, 0, 0};
 	int status = -1;
 
-	cmd[0] = schan_header(SCHAN_READ_REG_CMD, cdk_addr_to_block(addr), 8);
+	cmd[0] = schan_header(SCHAN_READ_REG_CMD, cdk_addr_to_block(addr), 2);
 	cmd[1] = addr;
 
 	if (bde_schan_op(cmd, 2, resp, 3, &status) < 0 || status != 0) {

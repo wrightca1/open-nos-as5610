@@ -202,6 +202,16 @@ int bcm56846_chip_init(int unit)
 			"[init] diagnostics: ring_cfg(0x10c)=0x%08x"
 			" ring_head(0x400)=0x%08x\n",
 			ring_cfg, ring_head);
+
+		/* Clear stale SCHAN DMA ring config from Cumulus warm boot.
+		 * Non-zero ring_cfg (e.g. 0x32000043) may interfere with
+		 * SCHAN PIO WRITE_MEM operations.  Bit 5 (CPS_RESET) is
+		 * already 0 at this point. */
+		if (ring_cfg != 0) {
+			bde_write_reg(CMIC_SCHAN_RING_CFG, 0x00000000u);
+			fprintf(stderr,
+				"[init] cleared ring_cfg(0x10c) -> 0\n");
+		}
 	}
 
 	/*

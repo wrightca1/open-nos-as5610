@@ -23,6 +23,7 @@ set(SDK_SOURCES
   src/pktio.c
   src/stats.c
   src/serdes.c
+  src/wc_ucode_b0.c
 )
 
 add_library(bcm56846 SHARED ${SDK_SOURCES})
