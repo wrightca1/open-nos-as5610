@@ -75,13 +75,19 @@ void *bde_mmap_dma(void)
 int bde_schan_op(const uint32_t *cmd, int cmd_words, uint32_t *data, int data_len, int *status)
 {
 	struct nos_bde_schan s = { .len = cmd_words, .status = -1 };
-	memcpy(s.cmd, cmd, sizeof(uint32_t) * (cmd_words <= 16 ? cmd_words : 16));
-	if (data && data_len > 0)
-		memcpy(s.data, data, sizeof(uint32_t) * (data_len <= 16 ? data_len : 16));
-	if (bde_fd < 0 || ioctl(bde_fd, NOS_BDE_SCHAN_OP, &s) < 0)
+
+	if (bde_fd < 0 || cmd_words <= 0 || cmd_words > 16)
 		return -1;
+
+	memcpy(s.cmd, cmd, sizeof(uint32_t) * (size_t)cmd_words);
+	if (data && data_len > 0)
+		memcpy(s.data, data, sizeof(uint32_t) * (size_t)(data_len <= 16 ? data_len : 16));
+
+	if (ioctl(bde_fd, NOS_BDE_SCHAN_OP, &s) < 0)
+		return -1;
+
 	*status = s.status;
 	if (data && data_len > 0)
-		memcpy(data, s.data, sizeof(uint32_t) * (data_len <= 16 ? data_len : 16));
+		memcpy(data, s.data, sizeof(uint32_t) * (size_t)(data_len <= 16 ? data_len : 16));
 	return 0;
 }

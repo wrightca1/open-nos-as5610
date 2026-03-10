@@ -3,7 +3,7 @@
  *
  * Implements the full OpenMDK WARPcore initialization sequence:
  *   1. Stop PLL sequencer
- *   2. Download uC firmware (wc40_ucode_b0_bin, ~38KB via XLPORT UCMEM)
+ *   2. Download uC firmware (wc40_ucode_b0_bin, ~38KB via MDIO serial)
  *   3. Start PLL sequencer, wait for lock
  *   4. Per-lane 10G SFI speed configuration:
  *      - Hold Tx/Rx ASIC reset (MISC6)
@@ -83,7 +83,7 @@ extern unsigned int wc40_ucode_b0_bin_len;
 #define WC_UC_ADDRESS     0xFFC1u
 #define WC_UC_COMMAND     0xFFC2u  /* bit15=INIT_CMD, bit4=UC_RESET_N */
 #define WC_UC_WRDATA      0xFFC3u
-#define WC_UC_DL_STATUS   0xFFC5u  /* bit2=INIT_DONE, bit1=ERR1, bit0=ERR0 */
+#define WC_UC_DL_STATUS   0xFFC5u  /* bit15=INIT_DONE, bit[5:2]=FSM, bit1=ERR1, bit0=ERR0 */
 #define WC_UC_COMMAND2    0xFFCAu  /* bit5=TMR_EN */
 #define WC_UC_COMMAND3    0xFFCCu  /* bit0=EXT_MEM_ENABLE, bit1=EXT_CLK_ENABLE */
 #define WC_COMBO_MII_CTRL 0xFFE0u  /* bit12=AN_ENABLE */
@@ -331,6 +331,9 @@ static void miim_divider_init(void)
 	bde_write_reg(CMIC_MIIM_EXT_SEL_MAP, (1u << 16) | 396u);
 }
 
+#if 0 /* Old UCMEM/SCHAN path — replaced by MDIO serial download below.
+       * SCHAN WRITE_MEM to XLPORT UCMEM completes with DONE but data never
+       * lands (readback always zeros). Root cause unknown. */
 /*--- Firmware download via XLPORT UCMEM (SCHAN WRITE_MEM) ---*/
 
 /*
@@ -449,11 +452,46 @@ static int wc_ucmem_download(int phy, int bus, int port)
 		return -EIO;
 	}
 
-	/* Clear UCMEM first (OpenMDK clears all 4096 entries).
-	 * Stale data from previous boot's firmware may confuse 8051. */
+	/* DEBUG: test UCMEM with known pattern before firmware write */
+	{
+		uint32_t test_wr[4] = {0xDEADBEEF, 0xCAFEBABE,
+				       0x12345678, 0x87654321};
+		uint32_t test_rd[4] = {0, 0, 0, 0};
+		int trc;
+
+		trc = sbus_mem_write_blk(xlport_blk, XLPORT_WC_UCMEM_DATA,
+					 0, test_wr, 4);
+		fprintf(stderr, "[serdes] PHY %d: UCMEM test write rc=%d "
+			"(blk=%u addr=0x%08x)\n",
+			phy, trc, xlport_blk, XLPORT_WC_UCMEM_DATA);
+
+		trc = sbus_mem_read_blk(xlport_blk, XLPORT_WC_UCMEM_DATA,
+					0, test_rd, 4);
+		fprintf(stderr, "[serdes] PHY %d: UCMEM test readback rc=%d: "
+			"%08x %08x %08x %08x\n",
+			phy, trc, test_rd[0], test_rd[1],
+			test_rd[2], test_rd[3]);
+		fprintf(stderr, "[serdes] PHY %d: UCMEM test expected:       "
+			"%08x %08x %08x %08x\n",
+			phy, test_wr[0], test_wr[1],
+			test_wr[2], test_wr[3]);
+
+		/* Print expected SCHAN header for 4-dword WRITE_MEM */
+		{
+			uint32_t hdr = (0x09u << 26) | (xlport_blk << 20)
+				     | (0u << 14) | (16u << 7);
+			fprintf(stderr, "[serdes] PHY %d: SCHAN header for "
+				"WRITE_MEM 4dw: 0x%08x "
+				"(blk=%u datalen=%u bytes)\n",
+				phy, hdr, xlport_blk, 16u);
+		}
+	}
+
+	/* Clear UCMEM (skip full 4096 to save time — only need fw_size) */
 	{
 		uint32_t zero[4] = {0, 0, 0, 0};
-		for (idx = 0; idx < 4096; idx++) {
+		uint32_t clear_cnt = (fw_size_aligned >> 4) + 1;
+		for (idx = 0; idx < clear_cnt; idx++) {
 			rc = sbus_mem_write_blk(xlport_blk,
 						XLPORT_WC_UCMEM_DATA,
 						(int)idx, zero, 4);
@@ -466,8 +504,8 @@ static int wc_ucmem_download(int phy, int bus, int port)
 				return -EIO;
 			}
 		}
-		fprintf(stderr, "[serdes] PHY %d: cleared 4096 UCMEM entries\n",
-			phy);
+		fprintf(stderr, "[serdes] PHY %d: cleared %u UCMEM entries\n",
+			phy, clear_cnt);
 	}
 
 	/* Write firmware data */
@@ -496,6 +534,20 @@ static int wc_ucmem_download(int phy, int bus, int port)
 					   XLPORT_WC_UCMEM_CTRL, 0u);
 			return -EIO;
 		}
+
+		/* DEBUG: readback first entry immediately */
+		if (chunk == 0) {
+			uint32_t rb[4] = {0, 0, 0, 0};
+			sbus_mem_read_blk(xlport_blk, XLPORT_WC_UCMEM_DATA,
+					  0, rb, 4);
+			fprintf(stderr, "[serdes] PHY %d: FW[0] wrote: "
+				"%08x %08x %08x %08x\n", phy,
+				ucmem_entry[0], ucmem_entry[1],
+				ucmem_entry[2], ucmem_entry[3]);
+			fprintf(stderr, "[serdes] PHY %d: FW[0] readback: "
+				"%08x %08x %08x %08x\n", phy,
+				rb[0], rb[1], rb[2], rb[3]);
+		}
 	}
 
 	/* Verify first UCMEM entry by reading it back */
@@ -503,7 +555,7 @@ static int wc_ucmem_download(int phy, int bus, int port)
 		uint32_t readback[4] = {0, 0, 0, 0};
 		if (sbus_mem_read_blk(xlport_blk, XLPORT_WC_UCMEM_DATA,
 				      0, readback, 4) == 0) {
-			fprintf(stderr, "[serdes] PHY %d: UCMEM[0] readback: "
+			fprintf(stderr, "[serdes] PHY %d: UCMEM[0] final: "
 				"%08x %08x %08x %08x\n", phy,
 				readback[0], readback[1],
 				readback[2], readback[3]);
@@ -550,6 +602,120 @@ static int wc_ucmem_download(int phy, int bus, int port)
 	}
 	fprintf(stderr, "[serdes] PHY %d: firmware version=0x%04x (%ums)\n",
 		phy, val, cnt);
+
+	return 0;
+}
+#endif /* Old UCMEM/SCHAN path */
+
+/*--- Firmware download via MDIO serial (WARPcore WRDATA register) ---*/
+
+/*
+ * Download WARPcore uC firmware via MDIO serial download.
+ *
+ * The WARPcore 8051 supports two firmware loading paths:
+ *   A) Parallel bus (UCMEM) — SCHAN WRITE_MEM to XLPORT_WC_UCMEM_DATAm
+ *   B) MDIO serial — WRITE|RUN mode, 16-bit words via WRDATA register
+ *
+ * Path A requires working SCHAN WRITE_MEM to XLPORT UCMEM, which fails
+ * silently on our CMICe PIO implementation (writes complete with DONE
+ * but data doesn't land — readback always zeros).
+ *
+ * Path B uses only MIIM register writes, which are confirmed working.
+ * This is the fallback path from OpenMDK bcmi_warpcore_xgxs_firmware_set.c
+ * (used when firmware_helper callback is NULL).
+ *
+ * Must be called with PLL sequencer STOPPED.
+ */
+static int wc_firmware_download(int phy, int bus)
+{
+	uint32_t cnt, idx, fw_size_aligned;
+	uint16_t val;
+
+	fw_size_aligned = (wc40_ucode_b0_bin_len + 15u) & ~15u;
+	fprintf(stderr, "[serdes] PHY %d bus %d: downloading %u bytes "
+		"firmware via MDIO serial\n",
+		phy, bus, wc40_ucode_b0_bin_len);
+
+	/* 1. Reset 8051 and clear download status */
+	wc_write(phy, 0, bus, WC_UC_COMMAND, 0x0000);
+	usleep(1000);
+	wc_write(phy, 0, bus, WC_UC_DL_STATUS, 0x0000);
+
+	/* 2. Initialize RAM: COMMAND = INIT_CMD (bit 15) */
+	wc_write(phy, 0, bus, WC_UC_COMMAND, 0x8000);
+
+	/* 3. Poll INIT_DONE (bit 15) in DL_STATUS */
+	val = 0;
+	for (cnt = 0; cnt < 500; cnt++) {
+		wc_read(phy, 0, bus, WC_UC_DL_STATUS, &val);
+		if (val & 0x8000)
+			break;
+		usleep(1000);
+	}
+	fprintf(stderr, "[serdes] PHY %d: INIT_DONE poll %s (%u ms, "
+		"DL_STATUS=0x%04x)\n", phy,
+		(val & 0x8000) ? "OK" : "TIMEOUT", cnt, val);
+	if (!(val & 0x8000)) {
+		fprintf(stderr, "[serdes] PHY %d: RAM init timeout\n", phy);
+		return -ETIMEDOUT;
+	}
+
+	/* 4. Enable uC timers: COMMAND2 bit 5 = TMR_EN */
+	wc_read(phy, 0, bus, WC_UC_COMMAND2, &val);
+	wc_write(phy, 0, bus, WC_UC_COMMAND2, val | 0x0020);
+
+	/* 5. Set transfer size (aligned - 1) and start address */
+	wc_write(phy, 0, bus, WC_UC_RAMWORD,
+		 (uint16_t)(fw_size_aligned - 1));
+	wc_write(phy, 0, bus, WC_UC_ADDRESS, 0x0000);
+
+	/* 6. Start MDIO serial write: COMMAND = WRITE (bit3) | RUN (bit0) */
+	wc_write(phy, 0, bus, WC_UC_COMMAND, 0x0009);
+
+	/* 7. Write firmware as 16-bit words (little-endian byte order).
+	 *    Each WRDATA write auto-advances the internal address pointer.
+	 *    ~38KB / 2 bytes = ~19000 MIIM writes — takes a few seconds. */
+	for (idx = 0; idx < fw_size_aligned; idx += 2) {
+		uint16_t data = 0;
+		if (idx < wc40_ucode_b0_bin_len)
+			data = wc40_ucode_b0_bin[idx];
+		if (idx + 1 < wc40_ucode_b0_bin_len)
+			data |= (uint16_t)wc40_ucode_b0_bin[idx + 1] << 8;
+		wc_write(phy, 0, bus, WC_UC_WRDATA, data);
+	}
+	fprintf(stderr, "[serdes] PHY %d: wrote %u bytes via MDIO\n",
+		phy, fw_size_aligned);
+
+	/* 8. Stop: COMMAND = STOP (bit 1) */
+	wc_write(phy, 0, bus, WC_UC_COMMAND, 0x0002);
+
+	/* 9. Check for errors */
+	wc_read(phy, 0, bus, WC_UC_DL_STATUS, &val);
+	fprintf(stderr, "[serdes] PHY %d: post-download DL_STATUS=0x%04x\n",
+		phy, val);
+	if (val & 0x0003) {
+		fprintf(stderr, "[serdes] PHY %d: firmware download error "
+			"(ERR0=%d ERR1=%d)\n", phy,
+			(int)(val & 1), (int)((val >> 1) & 1));
+		return -EIO;
+	}
+
+	/* 10. Disable CRC check */
+	wc_write(phy, 0, bus, WC_FW_CRC, 0x0001);
+
+	/* 11. Start uC: COMMAND = MDIO_UC_RESET_N (bit 4) */
+	wc_write(phy, 0, bus, WC_UC_COMMAND, 0x0010);
+
+	/* 12. Wait for firmware to start (version register != 0) */
+	val = 0;
+	for (cnt = 0; cnt < 500; cnt++) {
+		wc_read(phy, 0, bus, WC_FW_VERSION, &val);
+		if (val != 0)
+			break;
+		usleep(1000);
+	}
+	fprintf(stderr, "[serdes] PHY %d: firmware version=0x%04x "
+		"(%u ms after download)\n", phy, val, cnt);
 
 	return 0;
 }
@@ -655,15 +821,10 @@ static int wc_phy_init(int phy, int bus, int port)
 	val |= (2u << 8) | (1u << 12);  /* AFE=2, SEL=1 */
 	wc_write(phy, 0, bus, WC_MISC1, val);
 
-	/*
-	 * Download firmware with PLL stopped (monolithic).
-	 * The MDIO state machine (EXT_MEM_ENABLE etc.) must be active
-	 * during UCMEM write — it routes UCMEM data to the 8051's
-	 * internal program RAM in real-time.
-	 */
-	if (wc_ucmem_download(phy, bus, port) < 0)
+	/* Download firmware via MDIO serial with PLL stopped. */
+	if (wc_firmware_download(phy, bus) < 0)
 		fprintf(stderr, "[serdes] WARNING: firmware download failed "
-			"PHY %d bus %d port %d\n", phy, bus, port);
+			"PHY %d bus %d\n", phy, bus);
 
 	/* Start PLL sequencer: XGXSCONTROL bit 13 = 1
 	 * WARNING: This resets all MICROBLK registers (UC_COMMAND,
@@ -864,22 +1025,8 @@ int bcm56846_serdes_init_10g(int unit, int port)
 		uint16_t sigdet, misc1_rb, misc3_rb, rx66_rb, cl49_ctrl;
 		int cnt;
 
-		/*
-		 * Enable IEEE loopback for testing without SFPs.
-		 * For 1-lane ports, OpenMDK does NOT toggle the PLL sequencer
-		 * (that resets FORCE_SPEED!). Just set MDIO_CONT_EN + GLOOP1G.
-		 * TODO: remove this once real link testing works.
-		 */
-
-		/* Enable MDIO control for loopback mode */
-		wc_read(phy, 0, bus, WC_XGXSCONTROL, &val);
-		wc_write(phy, 0, bus, WC_XGXSCONTROL, val | (1u << 4));
-
-		/* Set GLOOP1G for this lane (no sequencer toggle for 1-lane) */
-		wc_read(phy, lane, bus, 0x8017u, &val);
-		wc_write(phy, lane, bus, 0x8017u, val | (1u << lane));
-
-		usleep(500000); /* 500ms settle for PCS to lock */
+		/* Wait for PCS to settle with external signal */
+		usleep(500000);
 
 		/* Readback key config registers to verify writes */
 		wc_read(phy, lane, bus, WC_ANARXSTATUS, &sigdet);

@@ -16,7 +16,7 @@
 | **Phase 1a DTB/initramfs/FIT** | ✅ In place | initramfs/build.sh, boot/build-fit.sh, real Cumulus DTB (boot/as5610_52x.dtb) |
 | **Rootfs** | ✅ Debian Jessie PPC32 | rootfs/build.sh — jessie from archive.debian.org (last Debian with powerpc); glibc 2.19 + systemd 215 compatible with Linux 5.10 |
 | **ONIE installer .bin** | ✅ Produced | 171MB; all NOS binaries included (nos-switchd, libbcm56846.so, BDE .ko, platform-mgrd); served at http://10.22.1.4:8000/ |
-| **Hardware validation** | 🟡 In progress | SCHAN, I2C, thermal, fans, CPLD all verified working after reboot. I2C mux (PCA954x) loads at boot, hwmon sensors bind, thermal fan control active. XMAC access confirmed. SerDes SIGDET on 3 PHYs. CL49 block lock pending (firmware download). L2 flooding + VLAN 1 configured. |
+| **Hardware validation** | 🟡 In progress | SCHAN, I2C, thermal, fans, CPLD all verified working after reboot. I2C mux (PCA954x) loads at boot, hwmon sensors bind, thermal fan control active. XMAC access confirmed. SerDes SIGDET on 3 PHYs. **WARPcore firmware v0x0101 loaded on all PHYs** via MDIO serial. CL49 BLOCK_LOCK=1 achieved in loopback. External 10G link pending retimer unmuting. L2 flooding + VLAN 1 configured. |
 
 ---
 
@@ -25,7 +25,7 @@
 - **Kernel:** Linux 5.10.0-nos (mpc85xx_cds_defconfig + AS5610 patches), PPC32 uImage + modules
   - eTSEC/gianfar (eth0, management), I2C MPC + PCA954x mux (70 buses), AT24 EEPROM (SFP sysfs), ADM1021/MAX6697 hwmon, GPIO PCA953x
 - **BDE:** `nos_kernel_bde.ko`, `nos_user_bde.ko` — vermagic `5.10.0-nos`; PCI probe, BAR0, 8MB DMA pool, S-Channel, ioctl READ_REG/WRITE_REG/GET_DMA_INFO/SCHAN_OP, mmap DMA
-- **SDK:** `libbcm56846.so` — attach/detach/init, config.bcm, SOC runner, sbus SCHAN (mem_read/write, reg_read/write); **port** (enable, link, SerDes 10G via WARPcore MDIO + CL45 PCS link); **L2** add/delete/get + **L2_USER_ENTRY** add/delete; **L3** intf/egress/route/host + **ECMP**; **VLAN**; **pktio** (TX/RX DCB21, CMICe DMA); **stats** (RPKT/RBYT/TPKT/TBYT). All modules use proper sbus.h SCHAN transport.
+- **SDK:** `libbcm56846.so` — attach/detach/init, config.bcm, SOC runner, sbus SCHAN (mem_read/write, reg_read/write); **port** (enable, link, SerDes 10G via WARPcore MDIO + CL45 PCS link); **SerDes** (WARPcore 8051 firmware download via MDIO serial, 10G SFI forced speed, 64B/66B sync words, CL49 PCS); **L2** add/delete/get + **L2_USER_ENTRY** add/delete; **L3** intf/egress/route/host + **ECMP**; **VLAN**; **pktio** (TX/RX DCB21, CMICe DMA); **stats** (RPKT/RBYT/TPKT/TBYT). All modules use proper sbus.h SCHAN transport.
 - **nos-switchd:** PPC32 executable — attach, init, TUN creation, netlink (NEWLINK→port enable, NEWADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr), link-state poll, TX thread, RX callback→TUN write.
 - **platform-mgrd:** PPC32 executable — CPLD watchdog keepalive (15s), thermal→fan PWM (4 zones, 35/45/55°C), PSU presence/ok monitor, SFP EEPROM read (sysfs at24 + I2C fallback)
 - **Tests:** `bde_validate` — READ_REG(0), mmap DMA write/read, READ_REG(0x32800)
@@ -73,8 +73,9 @@
 | XLPORT/XMAC init | ✅ | xport_reset → XLPORT_MODE → PORT_ENABLE → XMAC_CONTROL; TX_CTRL reads 0xc802 |
 | VLAN 1 + STG | ✅ | VLAN_TABm, EGR_VLANm, STG_TABm configured; PORT_VID=1 default |
 | L2 flooding | ✅ | UNKNOWN_UCAST/MCAST_BLOCK_MASK zeroed (flood to all VLAN ports) |
-| CL49 block lock | 🟡 | Firmware download via UCMEM implemented but 8051 not starting (version=0); CL49 HiGig2 bits cleared; forced speed correct (0x29); BLOCK_LOCK not achieved in loopback or with external signal |
-| Port link (10G) | 🟡 | CL45 PCS link status implemented; pending valid 10G peer |
+| WARPcore firmware | ✅ | 8051 firmware v0x0101 loaded on all PHYs (13,17,31 on bus 1; 1,5,9,13,17,21,31 on bus 0; 1,9,13,17,21,31 on bus 2) via MDIO serial download. UCMEM/SCHAN path failed silently (data never lands); MDIO serial path works. |
+| CL49 block lock | ✅ (loopback) | BLOCK_LOCK=1 achieved in IEEE loopback with correct forced speed (FV_fdr_10G_SFI=0x29) + 64B/66B sync words. External signal: SIGDET=0 (retimers need unmuting). |
+| Port link (10G) | 🟡 | CL45 PCS link status implemented; pending retimer unmuting + valid 10G peer |
 | L2/L3 forwarding | ⏳ | Pending port link-up; ASIC datapath fully configured |
 
 **Warm-boot note**: CMC2 remains in DMA ring-buffer mode after warm reboot; PIO SCHAN requires
@@ -90,7 +91,8 @@ cold hardware power cycle (unplug + replug).
 |-------|--------|--------|
 | BDE vermagic `5.10.0-nos` | Kernel and BDE .ko must be rebuilt together; stale .ko will fail `insmod` | Known; rebuild BDE whenever kernel is rebuilt (`BUILD_KERNEL=1`) |
 | WRITE_REG ioctl direction | Deployed .ko uses `_IOR` (0x80084202); source has `_IOW` | Workaround in `bde_ioctl.c`; needs .ko rebuild |
-| CL49 block lock (external) | IEEE loopback works, but external 10G signal never achieves CL49 lock | **Primary blocker for packet forwarding**; remote end may not send valid 64B/66B |
+| UCMEM SCHAN WRITE_MEM fails | SCHAN writes to XLPORT UCMEM complete with DONE but data readback is zeros | Workaround: firmware loaded via MDIO serial instead; root cause unknown |
+| External 10G link pending | CL49 BLOCK_LOCK works in loopback but SIGDET=0 without loopback | DS100DF410 retimers default OUTPUT MUTED; need automated unmuting in nos-switchd |
 | Retimer CDR never locks | DS100DF410 CDR status bit4=0 on all channels despite signal | May not be in active signal path; needs further investigation |
 | fw_setenv not working | Cannot set U-Boot env from NOS (MTD/CFI modules not loading) | Trigger ONIE via boot_count or U-Boot console |
 | CPLD sysfs driver | platform-mgrd opens `/sys/devices/…/ea000000.cpld/`; requires CPLD .ko | Working with accton_as5610_cpld.ko; loads at boot via nos-bde-modules.service |

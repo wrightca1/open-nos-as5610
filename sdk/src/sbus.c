@@ -22,12 +22,19 @@
 #define SCHAN_WRITE_MEM_CMD  0x09u
 
 /* Build SCHAN header word.
- * dwords: data word count (number of 32-bit data words, NOT byte count).
- * CDK field name: V2_SCHAN_MSG_DWC at bits [13:7]. */
+ * dwords: number of 32-bit data words.
+ * The DATALEN field (bits [13:7]) is in BYTES — the CMIC uses it to
+ * determine how many bytes of data to send over SBUS for WRITE_MEM
+ * and WRITE_REG commands.  See OpenMDK cdk/PKG/arch/xgs/xgs_mem.c:
+ *   datalen = entry_dw * sizeof(uint32_t);
+ * With the wrong unit (dwords instead of bytes), WRITE_MEM only
+ * sends 1 dword instead of 4 for 128-bit memories like UCMEM. */
 static inline uint32_t schan_header(uint32_t opcode, uint32_t dstblk,
 				    uint32_t dwords)
 {
-	return (opcode << 26) | (dstblk << 20) | (0u << 14) | (dwords << 7);
+	uint32_t datalen_bytes = dwords * 4u;
+	return (opcode << 26) | (dstblk << 20) | (0u << 14)
+	     | (datalen_bytes << 7);
 }
 
 /* Extract SBUS block number from CDK address */
