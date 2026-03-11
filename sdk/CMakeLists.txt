@@ -23,6 +23,7 @@ set(SDK_SOURCES
   src/pktio.c
   src/stats.c
   src/serdes.c
+  src/i2c.c
   src/wc_ucode_b0.c
 )
 

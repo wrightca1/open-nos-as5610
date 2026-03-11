@@ -39,6 +39,7 @@
  */
 #include "bcm56846.h"
 #include "bcm56846_regs.h"
+#include "i2c.h"
 #include "sbus.h"
 #include <errno.h>
 #include <stdio.h>
@@ -321,6 +322,61 @@ static int port_to_phy_bus(int port, int *phy_addr, int *bus_id, int *lane)
 	}
 
 	return -EINVAL;
+}
+
+/*--- DS100DF410 retimer unmuting ---*/
+
+#define DS100_ADDR      0x27
+#define DS100_CH_SEL    0xFF
+#define DS100_CH_BCAST  0x0C   /* broadcast all channels */
+#define DS100_OUT_MUX   0x1E   /* default 0xE9 = muted */
+
+/*
+ * Map 10G SFP+ port to retimer I2C bus.
+ * From manual probing: buses 10-13 have DS100DF410 retimers
+ * that feed WARPcore PHY 13, 17, 31 on MDIO bus 1.
+ */
+static int port_to_retimer_bus(int port)
+{
+	switch (port) {
+	case 49: return 10;
+	case 50: return 11;
+	case 51: return 12;
+	case 52: return 13;
+	default: return -1;
+	}
+}
+
+/*
+ * Unmute DS100DF410 retimer output for a 10G SFP+ port.
+ * Default state has OUTPUT MUTED (reg 0x1E = 0xE9, OUT_MUX=7).
+ * Write 0x00 to unmute so signal reaches the WARPcore PHY.
+ */
+static void retimer_unmute(int port)
+{
+	int bus = port_to_retimer_bus(port);
+	uint8_t val;
+
+	if (bus < 0)
+		return;
+
+	/* Select broadcast (all channels) */
+	if (i2c_write_reg(bus, DS100_ADDR, DS100_CH_SEL, DS100_CH_BCAST) < 0) {
+		fprintf(stderr, "[serdes] retimer bus %d: I2C write failed\n",
+			bus);
+		return;
+	}
+
+	/* Read current OUT_MUX register */
+	if (i2c_read_reg(bus, DS100_ADDR, DS100_OUT_MUX, &val) == 0)
+		fprintf(stderr, "[serdes] retimer bus %d: OUT_MUX=0x%02x\n",
+			bus, val);
+
+	/* Unmute: clear OUT_MUX bits */
+	i2c_write_reg(bus, DS100_ADDR, DS100_OUT_MUX, 0x00);
+
+	fprintf(stderr, "[serdes] retimer bus %d: unmuted for port %d\n",
+		bus, port);
 }
 
 /*--- MIIM clock divider setup ---*/
@@ -636,9 +692,13 @@ static int wc_firmware_download(int phy, int bus)
 		"firmware via MDIO serial\n",
 		phy, bus, wc40_ucode_b0_bin_len);
 
-	/* 1. Reset 8051 and clear download status */
-	wc_write(phy, 0, bus, WC_UC_COMMAND, 0x0000);
+	/* 1. Reset 8051 (aggressive for warm boot).
+	 *    On warm boot the 8051 may already be running with old firmware.
+	 *    Must fully stop it before re-downloading. */
+	wc_write(phy, 0, bus, WC_UC_COMMAND, 0x0002);  /* STOP first */
 	usleep(1000);
+	wc_write(phy, 0, bus, WC_UC_COMMAND, 0x0000);  /* Clear all */
+	usleep(10000);  /* 10ms for 8051 to fully halt */
 	wc_write(phy, 0, bus, WC_UC_DL_STATUS, 0x0000);
 
 	/* 2. Initialize RAM: COMMAND = INIT_CMD (bit 15) */
@@ -821,10 +881,18 @@ static int wc_phy_init(int phy, int bus, int port)
 	val |= (2u << 8) | (1u << 12);  /* AFE=2, SEL=1 */
 	wc_write(phy, 0, bus, WC_MISC1, val);
 
-	/* Download firmware via MDIO serial with PLL stopped. */
-	if (wc_firmware_download(phy, bus) < 0)
-		fprintf(stderr, "[serdes] WARNING: firmware download failed "
-			"PHY %d bus %d\n", phy, bus);
+	/* Check if firmware is already loaded (warm boot).
+	 * If version 0x0101 is already running, skip download. */
+	wc_read(phy, 0, bus, WC_FW_VERSION, &val);
+	if (val == 0x0101) {
+		fprintf(stderr, "[serdes] PHY %d bus %d: firmware v0x0101 "
+			"already loaded, skipping download\n", phy, bus);
+	} else {
+		/* Download firmware via MDIO serial with PLL stopped. */
+		if (wc_firmware_download(phy, bus) < 0)
+			fprintf(stderr, "[serdes] WARNING: firmware download "
+				"failed PHY %d bus %d\n", phy, bus);
+	}
 
 	/* Start PLL sequencer: XGXSCONTROL bit 13 = 1
 	 * WARNING: This resets all MICROBLK registers (UC_COMMAND,
@@ -1019,6 +1087,11 @@ int bcm56846_serdes_init_10g(int unit, int port)
 		wc_write(phy, lane, bus, WC_CONTROL1000X3, val);
 	}
 
+	/* Unmute retimer so external 10G signal reaches the WARPcore PHY.
+	 * DS100DF410 defaults to OUTPUT MUTED after cold boot. */
+	if (port >= 49 && port <= 52)
+		retimer_unmute(port);
+
 	/* Diagnostic: read CL49 and CL45 PCS status for 10G SFP+ ports. */
 	if (port >= 49 && port <= 52) {
 		uint16_t cl49_status, cl49_lsm, pcs_status;
@@ -1054,6 +1127,9 @@ int bcm56846_serdes_init_10g(int unit, int port)
 		for (cnt = 0; cnt < 5; cnt++) {
 			wc_read(phy, lane, bus, 0x8367u, &cl49_status);
 			wc_read(phy, lane, bus, 0x8368u, &cl49_lsm);
+			/* PCS status is latched-low: first read clears
+			 * latch, second read returns current state */
+			wc_cl45_read(phy, bus, 3, 0x0001, &pcs_status);
 			wc_cl45_read(phy, bus, 3, 0x0001, &pcs_status);
 
 			fprintf(stderr, "[serdes] port %d [%d]: "
@@ -1092,7 +1168,10 @@ int bcm56846_serdes_link_get(int unit, int port, int *link_up)
 	miim_divider_init();
 
 	/* Read CL45 PCS_IEEESTATUS1r: devad=3, reg=1.
-	 * Bit 2 = RX_LINK_STATUS (latched low). */
+	 * Bit 2 = RX_LINK_STATUS (latched low).
+	 * First read clears latch, second read returns current state. */
+	if (wc_cl45_read(phy, bus, 3, 0x0001, &pcs_status) != 0)
+		return -EIO;
 	if (wc_cl45_read(phy, bus, 3, 0x0001, &pcs_status) != 0)
 		return -EIO;
 

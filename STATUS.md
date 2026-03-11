@@ -1,6 +1,6 @@
 # open-nos-as5610 — Build and Implementation Status
 
-**Last updated:** 2026-03-10
+**Last updated:** 2026-03-10 (session 2)
 
 ---
 
@@ -10,13 +10,13 @@
 |------|--------|-------|
 | **Build system** | ✅ Working | Build server (Debian, PPC32 cross), kernel + BDE + SDK + switchd + platform-mgrd + tests |
 | **Phase 1 — Boot + BDE** | ✅ Implemented | Kernel 5.10.0-nos, BDE modules, S-Channel, validation test |
-| **Phase 2 — SDK** | 🟢 2a–2g + L2_USER_ENTRY | Config, SOC runner, S-Chan, L2 add/delete/get, L2_USER_ENTRY add/delete, L3/ECMP, VLAN, port+SerDes, pktio, stats. All modules migrated to sbus.h (proper SCHAN). XMAC access working. 40G + HW tests pending. |
+| **Phase 2 — SDK** | 🟢 2a–2g + L2_USER_ENTRY | Config, SOC runner, S-Chan, L2 add/delete/get, L2_USER_ENTRY add/delete, L3/ECMP, VLAN, port+SerDes, pktio, stats. All modules migrated to sbus.h (proper SCHAN). XMAC access working. **DS100DF410 retimer unmuting + warm-boot firmware skip + PCS latched-low double-read added.** 40G + HW tests pending. |
 | **Phase 3 — nos-switchd** | 🟢 Core complete | Netlink→SDK for link/addr/route/neigh; link-state poll; TX/RX threads. Ready for HW/FRR test. |
 | **Phase 5 — Platform** | ✅ Complete | platform-mgrd: CPLD watchdog, thermal→fan PWM, PSU monitor, SFP EEPROM (sysfs + I2C fallback) |
 | **Phase 1a DTB/initramfs/FIT** | ✅ In place | initramfs/build.sh, boot/build-fit.sh, real Cumulus DTB (boot/as5610_52x.dtb) |
 | **Rootfs** | ✅ Debian Jessie PPC32 | rootfs/build.sh — jessie from archive.debian.org (last Debian with powerpc); glibc 2.19 + systemd 215 compatible with Linux 5.10 |
 | **ONIE installer .bin** | ✅ Produced | 171MB; all NOS binaries included (nos-switchd, libbcm56846.so, BDE .ko, platform-mgrd); served at http://10.22.1.4:8000/ |
-| **Hardware validation** | 🟡 In progress | SCHAN, I2C, thermal, fans, CPLD all verified working after reboot. I2C mux (PCA954x) loads at boot, hwmon sensors bind, thermal fan control active. XMAC access confirmed. SerDes SIGDET on 3 PHYs. **WARPcore firmware v0x0101 loaded on all PHYs** via MDIO serial. CL49 BLOCK_LOCK=1 achieved in loopback. External 10G link pending retimer unmuting. L2 flooding + VLAN 1 configured. |
+| **Hardware validation** | 🟡 In progress | SCHAN, I2C, thermal, fans, CPLD all verified working after reboot. I2C mux (PCA954x) loads at boot, hwmon sensors bind, thermal fan control active. XMAC access confirmed. SerDes SIGDET on 3 PHYs. **WARPcore firmware v0x0101 loaded on all PHYs** via MDIO serial. CL49 BLOCK_LOCK=1 achieved in loopback. **Retimer unmuting automated** (DS100DF410 OUT_MUX cleared during SerDes init). **Warm-boot firmware skip** (detects v0x0101 already loaded). **PCS latched-low double-read** for accurate link status. L2 flooding + VLAN 1 configured. External 10G link pending valid 10G peer. |
 
 ---
 
@@ -25,7 +25,7 @@
 - **Kernel:** Linux 5.10.0-nos (mpc85xx_cds_defconfig + AS5610 patches), PPC32 uImage + modules
   - eTSEC/gianfar (eth0, management), I2C MPC + PCA954x mux (70 buses), AT24 EEPROM (SFP sysfs), ADM1021/MAX6697 hwmon, GPIO PCA953x
 - **BDE:** `nos_kernel_bde.ko`, `nos_user_bde.ko` — vermagic `5.10.0-nos`; PCI probe, BAR0, 8MB DMA pool, S-Channel, ioctl READ_REG/WRITE_REG/GET_DMA_INFO/SCHAN_OP, mmap DMA
-- **SDK:** `libbcm56846.so` — attach/detach/init, config.bcm, SOC runner, sbus SCHAN (mem_read/write, reg_read/write); **port** (enable, link, SerDes 10G via WARPcore MDIO + CL45 PCS link); **SerDes** (WARPcore 8051 firmware download via MDIO serial, 10G SFI forced speed, 64B/66B sync words, CL49 PCS); **L2** add/delete/get + **L2_USER_ENTRY** add/delete; **L3** intf/egress/route/host + **ECMP**; **VLAN**; **pktio** (TX/RX DCB21, CMICe DMA); **stats** (RPKT/RBYT/TPKT/TBYT). All modules use proper sbus.h SCHAN transport.
+- **SDK:** `libbcm56846.so` — attach/detach/init, config.bcm, SOC runner, sbus SCHAN (mem_read/write, reg_read/write); **port** (enable, link, SerDes 10G via WARPcore MDIO + CL45 PCS link); **SerDes** (WARPcore 8051 firmware download via MDIO serial, 10G SFI forced speed, 64B/66B sync words, CL49 PCS, **DS100DF410 retimer unmuting via I2C**, **warm-boot firmware skip**, **PCS latched-low double-read**); **I2C** (userspace /dev/i2c-N helper for retimer access); **L2** add/delete/get + **L2_USER_ENTRY** add/delete; **L3** intf/egress/route/host + **ECMP**; **VLAN**; **pktio** (TX/RX DCB21, CMICe DMA); **stats** (RPKT/RBYT/TPKT/TBYT). All modules use proper sbus.h SCHAN transport.
 - **nos-switchd:** PPC32 executable — attach, init, TUN creation, netlink (NEWLINK→port enable, NEWADDR→l3_intf, NEWROUTE/DELROUTE→l3_egress+route, NEWNEIGH/DELNEIGH→l2_addr), link-state poll, TX thread, RX callback→TUN write.
 - **platform-mgrd:** PPC32 executable — CPLD watchdog keepalive (15s), thermal→fan PWM (4 zones, 35/45/55°C), PSU presence/ok monitor, SFP EEPROM read (sysfs at24 + I2C fallback)
 - **Tests:** `bde_validate` — READ_REG(0), mmap DMA write/read, READ_REG(0x32800)
@@ -52,6 +52,8 @@
 | platform.conf | ✅ | accton_as5610_52x |
 | uboot_env | ✅ | cl.active, bootsource, cl.platform |
 | CPLD kernel driver | ✅ | accton_as5610_cpld.ko built out-of-tree, loads at boot |
+| i2c-mux-pca954x.ko | ✅ | Copied from kernel build; required for 70 I2C buses (SFP, retimer, hwmon) |
+| MTD/CFI modules | ✅ | Copied from kernel build; needed for fw_setenv (boot_count reset) |
 | Hardware boot test | ✅ | Boots on AS5610-52X via ONIE |
 
 ---
@@ -67,19 +69,21 @@
 | I2C / thermal | ✅ | 70 buses, MAX1617+MAX6697 hwmon, SFP EEPROMs, PCA954x muxes |
 | CPLD / fans / PSU | ✅ | accton_as5610_cpld.ko loaded at boot; platform-mgrd: watchdog, thermal fan PWM (4 zones), PSU monitor, LED control. Verified across reboots. |
 | 52 TAP interfaces | ✅ | swp1..swp52 as TUN/TAP; verified via `ip link show` |
-| DS100DF410 retimer | ✅ | Unmuted; 3 SFPs with RX light → SIGDET on WARPcore PHYs 13,17,31 |
+| DS100DF410 retimer | ✅ | **Automated unmuting** in SerDes init (I2C bus 10-13, addr 0x27, reg 0x1E=0x00). Verified: OUT_MUX reads 0xE9 on cold boot → cleared to 0x00. 3 SFPs with RX light → SIGDET on WARPcore PHYs 13,17,31 |
 | WARPcore MDIO | ✅ | MIIM CTRL=0x50, PARAM=0x158, ADDR=0x4A0; PRBS/HiGig2 cleared |
 | SerDes SIGDET | ✅ | SIGDET=0x1 on PHY 13,17,31 (MDIO bus 1) with SFP+ installed |
 | XLPORT/XMAC init | ✅ | xport_reset → XLPORT_MODE → PORT_ENABLE → XMAC_CONTROL; TX_CTRL reads 0xc802 |
 | VLAN 1 + STG | ✅ | VLAN_TABm, EGR_VLANm, STG_TABm configured; PORT_VID=1 default |
 | L2 flooding | ✅ | UNKNOWN_UCAST/MCAST_BLOCK_MASK zeroed (flood to all VLAN ports) |
-| WARPcore firmware | ✅ | 8051 firmware v0x0101 loaded on all PHYs (13,17,31 on bus 1; 1,5,9,13,17,21,31 on bus 0; 1,9,13,17,21,31 on bus 2) via MDIO serial download. UCMEM/SCHAN path failed silently (data never lands); MDIO serial path works. |
-| CL49 block lock | ✅ (loopback) | BLOCK_LOCK=1 achieved in IEEE loopback with correct forced speed (FV_fdr_10G_SFI=0x29) + 64B/66B sync words. External signal: SIGDET=0 (retimers need unmuting). |
-| Port link (10G) | 🟡 | CL45 PCS link status implemented; pending retimer unmuting + valid 10G peer |
+| WARPcore firmware | ✅ | 8051 firmware v0x0101 loaded on all PHYs via MDIO serial download. **Warm-boot safe**: detects v0x0101 already loaded and skips download. Aggressive 8051 reset (STOP+10ms) for clean re-download when needed. |
+| CL49 block lock | ✅ (loopback) | BLOCK_LOCK=1 achieved in IEEE loopback with correct forced speed (FV_fdr_10G_SFI=0x29) + 64B/66B sync words. Retimer unmuting now automated. |
+| Port link (10G) | 🟡 | CL45 PCS link status with **latched-low double-read** (devad=3 reg=1 bit2). Retimer unmuting working. Pending valid 10G peer for external link-up. |
 | L2/L3 forwarding | ⏳ | Pending port link-up; ASIC datapath fully configured |
 
 **Warm-boot note**: CMC2 remains in DMA ring-buffer mode after warm reboot; PIO SCHAN requires
-cold hardware power cycle (unplug + replug).
+cold hardware power cycle (unplug + replug). WARPcore firmware download now handles warm boot
+correctly: detects v0x0101 already loaded and skips download; aggressive 8051 STOP+reset for
+cases requiring re-download.
 
 **NOS_BDE_WRITE_REG ioctl**: Source uses `_IOR` (not `_IOW`) to match the deployed `.ko` binary.
 
@@ -92,9 +96,11 @@ cold hardware power cycle (unplug + replug).
 | BDE vermagic `5.10.0-nos` | Kernel and BDE .ko must be rebuilt together; stale .ko will fail `insmod` | Known; rebuild BDE whenever kernel is rebuilt (`BUILD_KERNEL=1`) |
 | WRITE_REG ioctl direction | Deployed .ko uses `_IOR` (0x80084202); source has `_IOW` | Workaround in `bde_ioctl.c`; needs .ko rebuild |
 | UCMEM SCHAN WRITE_MEM fails | SCHAN writes to XLPORT UCMEM complete with DONE but data readback is zeros | Workaround: firmware loaded via MDIO serial instead; root cause unknown |
-| External 10G link pending | CL49 BLOCK_LOCK works in loopback but SIGDET=0 without loopback | DS100DF410 retimers default OUTPUT MUTED; need automated unmuting in nos-switchd |
-| Retimer CDR never locks | DS100DF410 CDR status bit4=0 on all channels despite signal | May not be in active signal path; needs further investigation |
-| fw_setenv not working | Cannot set U-Boot env from NOS (MTD/CFI modules not loading) | Trigger ONIE via boot_count or U-Boot console |
+| External 10G link pending | CL49 BLOCK_LOCK works in loopback; retimer unmuting now automated | Need valid 10G peer sending 64B/66B for external link-up |
+| Retimer CDR never locks | DS100DF410 CDR status bit4=0 on all channels despite signal | May not be in active signal path; retimer output unmuted but CDR/EQ may be passthrough only |
+| fw_setenv not working | MTD modules load but physmap finds no flash (/proc/mtd empty) | LBC/ELBC controller may not be probed; CONFIG_MTD_PHYSMAP_OF may need =y not =m |
+| boot_count not reset | NOS cannot reset U-Boot boot_count; >3 reboots → ONIE | Blocked by fw_setenv; nos-boot-success.sh exists but MTD backend not working |
+| PHY 1 bus 0 firmware | Always fails download (SERDESID0=0x0000) | May not exist; doesn't affect 10G SFP+ ports |
 | CPLD sysfs driver | platform-mgrd opens `/sys/devices/…/ea000000.cpld/`; requires CPLD .ko | Working with accton_as5610_cpld.ko; loads at boot via nos-bde-modules.service |
 | IFP_METER_PARITY_CONTROLr | SCHAN write to 0x0a400000 fails; IFP block may not exist on BCM56846 | Non-critical; IFP meter parity is an optional errata workaround |
 | CMICe DMA CTRL model | CMIC_DMA_CTRL (0x100) is a single register with per-channel bit fields, not per-channel registers like CMICm | pktio.c CMICM_DMA_CTRL(ch) alias ignores channel — may need channel-aware bit manipulation |

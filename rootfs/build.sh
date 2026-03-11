@@ -172,6 +172,11 @@ if [ "$BUILD_ARTIFACTS" = "1" ]; then
 		         "$REPO_ROOT/platform/drivers/accton_as5610_cpld.ko"; do
 			[ -f "$ko" ] && cp -f "$ko" "$STAGING/lib/modules/$KERNEL_VERSION/"
 		done
+		# Install I2C mux module (PCA9548/PCA9546 mux expansion: 2 buses -> 70 buses)
+		if [ -n "$KERNEL_SRC" ]; then
+			I2C_MUX_KO="$KERNEL_SRC/drivers/i2c/muxes/i2c-mux-pca954x.ko"
+			[ -f "$I2C_MUX_KO" ] && cp -f "$I2C_MUX_KO" "$STAGING/lib/modules/$KERNEL_VERSION/"
+		fi
 		# Install MTD/CFI modules for U-Boot env access (boot_count reset via fw_setenv)
 		if [ -n "$KERNEL_SRC" ] && [ -d "$KERNEL_SRC/drivers/mtd" ]; then
 			log "Installing MTD/CFI kernel modules..."
